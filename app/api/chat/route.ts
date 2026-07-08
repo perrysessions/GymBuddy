@@ -28,7 +28,6 @@ export async function POST(req: NextRequest) {
     .select('weight_lbs, reps, notes, exercises(name), workout_sessions!inner(date, user_id, notes)')
     .eq('workout_sessions.user_id', user.id)
     .gte('workout_sessions.date', ninetyDaysAgo.toISOString().split('T')[0])
-    .order('workout_sessions(date)', { ascending: false })
     .limit(500)
 
   const { data: bodyWeights } = await supabase
@@ -72,22 +71,26 @@ Perry's body weight (most recent first): ${weightLines}
 
 Use this data to give specific, data-driven answers. Reference actual numbers and dates. If Perry asks about a specific exercise, focus on that exercise's trends. Note injuries or fatigue patterns when relevant. Be concise and practical.`
 
-  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
+  try {
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
 
-  const chat = model.startChat({
-    history: [
-      { role: 'user', parts: [{ text: systemPrompt }] },
-      { role: 'model', parts: [{ text: 'Understood. I have access to your workout data and am ready to help analyze your progress and answer your questions.' }] },
-      ...(history ?? []).map((m: { role: string; content: string }) => ({
-        role: m.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: m.content }],
-      })),
-    ],
-  })
+    const chat = model.startChat({
+      history: [
+        { role: 'user', parts: [{ text: systemPrompt }] },
+        { role: 'model', parts: [{ text: 'Understood. I have access to your workout data and am ready to help analyze your progress and answer your questions.' }] },
+        ...(history ?? []).map((m: { role: string; content: string }) => ({
+          role: m.role === 'assistant' ? 'model' : 'user',
+          parts: [{ text: m.content }],
+        })),
+      ],
+    })
 
-  const result = await chat.sendMessage(message)
-  const text = result.response.text()
-
-  return NextResponse.json({ reply: text })
+    const result = await chat.sendMessage(message)
+    const text = result.response.text()
+    return NextResponse.json({ reply: text })
+  } catch (err: any) {
+    console.error('Chat error:', err)
+    return NextResponse.json({ error: err.message ?? 'Gemini error' }, { status: 500 })
+  }
 }
