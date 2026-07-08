@@ -62,7 +62,6 @@ export default function DashboardClient({ allExerciseRows, recentSessions, bodyW
     }
     return Object.entries(counts)
       .sort((a, b) => b[1].count - a[1].count)
-      .slice(0, 6)
       .map(([id, { name, count }]) => ({ id, name, count }))
   }, [allExerciseRows, exerciseDays])
 
@@ -204,7 +203,7 @@ export default function DashboardClient({ allExerciseRows, recentSessions, bodyW
               No data for this period. <Link href="/import" className="underline" style={{ color: 'var(--accent)' }}>Import your notes</Link> or <Link href="/log" className="underline" style={{ color: 'var(--accent)' }}>log a workout</Link>.
             </p>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-2 overflow-y-auto max-h-96 pr-1">
               {priorityExercises.map((ex) => {
                 const isSelected = (selectedExerciseId ?? priorityExercises[0]?.id) === ex.id
                 return (
