@@ -53,12 +53,28 @@ export async function POST(req: NextRequest) {
 
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
 
+  const delay = (ms: number) => new Promise(r => setTimeout(r, ms))
+
   try {
     const model = genAI.getGenerativeModel({
       model: 'gemini-2.5-flash',
       generationConfig: { maxOutputTokens: 65536 },
     })
-    const result = await model.generateContent([PROMPT, rawNotes])
+    // Retry up to 3 times on 503 (server overload), with backoff
+    let result: any
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        result = await model.generateContent([PROMPT, rawNotes])
+        break
+      } catch (e: any) {
+        const is503 = String(e).includes('503') || String(e).includes('Service Unavailable')
+        if (is503 && attempt < 2) {
+          await delay(3000 * (attempt + 1))
+          continue
+        }
+        throw e
+      }
+    }
     const text = result.response.text().trim()
     const clean = text.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim()
     const compact = JSON.parse(clean)
