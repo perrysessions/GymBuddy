@@ -65,6 +65,8 @@ export default function ExerciseDetailClient({ exercise, exerciseId, sessions: i
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [bulkYear, setBulkYear] = useState(String(new Date().getFullYear()))
   const [bulkSaving, setBulkSaving] = useState(false)
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
   const supabase = createClient()
 
   const progressData = sessions.map(s => {
@@ -99,6 +101,19 @@ export default function ExerciseDetailClient({ exercise, exerciseId, sessions: i
 
   function selectAll() {
     setSelected(new Set(sessions.map(s => s.sessionId)))
+  }
+
+  async function deleteSession(sessionId: string) {
+    setDeleting(true)
+    const { error: e } = await supabase
+      .from('workout_sets')
+      .delete()
+      .eq('session_id', sessionId)
+      .eq('exercise_id', exerciseId)
+    if (e) { setError(e.message); setDeleting(false); return }
+    setSessions(prev => prev.filter(s => s.sessionId !== sessionId))
+    setDeleteConfirmId(null)
+    setDeleting(false)
   }
 
   async function applyBulkYear() {
@@ -397,11 +412,18 @@ export default function ExerciseDetailClient({ exercise, exerciseId, sessions: i
                 )}
                 <p className="text-sm font-semibold flex-1">{formatDate(s.date)}</p>
                 {!bulkMode && (
-                  <button onClick={() => startEdit(s)}
-                    className="text-xs px-2.5 py-1 rounded-lg border transition-colors hover:opacity-80"
-                    style={{ borderColor: 'var(--card-border)', color: 'var(--muted)' }}>
-                    Edit
-                  </button>
+                  <div className="flex gap-1.5">
+                    <button onClick={() => startEdit(s)}
+                      className="text-xs px-2.5 py-1 rounded-lg border transition-colors hover:opacity-80"
+                      style={{ borderColor: 'var(--card-border)', color: 'var(--muted)' }}>
+                      Edit
+                    </button>
+                    <button onClick={() => setDeleteConfirmId(s.sessionId)}
+                      className="text-xs px-2.5 py-1 rounded-lg border transition-colors hover:opacity-80"
+                      style={{ borderColor: 'var(--card-border)', color: '#ef4444' }}>
+                      Delete
+                    </button>
+                  </div>
                 )}
               </div>
               {s.sessionNotes && (
@@ -427,6 +449,34 @@ export default function ExerciseDetailClient({ exercise, exerciseId, sessions: i
           )
         })}
       </div>
+
+      {/* Delete confirmation dialog */}
+      {deleteConfirmId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+          <div className="absolute inset-0 bg-black/60" onClick={() => setDeleteConfirmId(null)} />
+          <div className="relative rounded-2xl border p-6 w-full max-w-sm space-y-4"
+            style={{ background: 'var(--card)', borderColor: 'var(--card-border)' }}>
+            <h3 className="text-base font-semibold">Delete this session?</h3>
+            <p className="text-sm" style={{ color: 'var(--muted)' }}>
+              This will permanently remove all sets for <strong>{exercise.name}</strong> on{' '}
+              <strong>{formatDate(sessions.find(s => s.sessionId === deleteConfirmId)?.date ?? '')}</strong>.
+              This cannot be undone.
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setDeleteConfirmId(null)}
+                className="flex-1 py-2 rounded-xl border text-sm font-medium"
+                style={{ borderColor: 'var(--card-border)', color: 'var(--muted)' }}>
+                Cancel
+              </button>
+              <button onClick={() => deleteSession(deleteConfirmId)} disabled={deleting}
+                className="flex-1 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
+                style={{ background: '#ef4444' }}>
+                {deleting ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
