@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { createClient } from '@/lib/supabase'
 
@@ -24,6 +25,7 @@ interface Props {
   exerciseId: string
   sessions: SessionData[]
   progressData: { date: string; max_weight: number; total_reps: number; volume: number }[]
+  allExercises: { id: string; name: string }[]
 }
 
 function formatDate(d: string) {
@@ -53,7 +55,7 @@ function sessionToEditState(s: SessionData): EditState {
   }
 }
 
-export default function ExerciseDetailClient({ exercise, exerciseId, sessions: initialSessions, progressData: initialProgress }: Props) {
+export default function ExerciseDetailClient({ exercise, exerciseId, sessions: initialSessions, progressData: initialProgress, allExercises }: Props) {
   const [chart, setChart] = useState<'weight' | 'volume' | 'avg_weight' | 'avg_reps'>('weight')
   const [sessions, setSessions] = useState<SessionData[]>(initialSessions)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -67,7 +69,12 @@ export default function ExerciseDetailClient({ exercise, exerciseId, sessions: i
   const [bulkSaving, setBulkSaving] = useState(false)
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [showMerge, setShowMerge] = useState(false)
+  const [mergeSearch, setMergeSearch] = useState('')
+  const [mergeTargetId, setMergeTargetId] = useState<string | null>(null)
+  const [merging, setMerging] = useState(false)
   const supabase = createClient()
+  const router = useRouter()
 
   const progressData = sessions.map(s => {
     const weights = s.sets.map(set => parseFloat(String(set.weight_lbs)) || 0).filter(w => w > 0)
@@ -101,6 +108,20 @@ export default function ExerciseDetailClient({ exercise, exerciseId, sessions: i
 
   function selectAll() {
     setSelected(new Set(sessions.map(s => s.sessionId)))
+  }
+
+  async function mergeInto(targetId: string) {
+    setMerging(true)
+    // Move all sets from this exercise to the target exercise
+    const { error: e } = await supabase
+      .from('workout_sets')
+      .update({ exercise_id: targetId })
+      .eq('exercise_id', exerciseId)
+    if (e) { setError(e.message); setMerging(false); return }
+    // Delete this exercise record
+    await supabase.from('exercises').delete().eq('id', exerciseId)
+    router.push(`/exercise/${targetId}`)
+    router.refresh()
   }
 
   async function deleteSession(sessionId: string) {
@@ -289,6 +310,11 @@ export default function ExerciseDetailClient({ exercise, exerciseId, sessions: i
 
       {/* Bulk year toolbar */}
       <div className="flex items-center justify-between gap-3">
+        <button onClick={() => setShowMerge(true)}
+          className="text-xs px-3 py-1.5 rounded-lg border transition-colors"
+          style={{ borderColor: 'var(--card-border)', color: 'var(--muted)' }}>
+          Merge into…
+        </button>
         <button onClick={toggleBulkMode}
           className="text-xs px-3 py-1.5 rounded-lg border transition-colors"
           style={{ borderColor: 'var(--card-border)', color: bulkMode ? 'var(--accent)' : 'var(--muted)', background: bulkMode ? 'rgba(232,93,4,0.1)' : 'transparent' }}>
@@ -449,6 +475,57 @@ export default function ExerciseDetailClient({ exercise, exerciseId, sessions: i
           )
         })}
       </div>
+
+      {/* Merge dialog */}
+      {showMerge && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+          <div className="absolute inset-0 bg-black/60" onClick={() => { setShowMerge(false); setMergeSearch(''); setMergeTargetId(null) }} />
+          <div className="relative rounded-2xl border p-6 w-full max-w-sm space-y-4"
+            style={{ background: 'var(--card)', borderColor: 'var(--card-border)' }}>
+            <h3 className="text-base font-semibold">Merge into another exercise</h3>
+            <p className="text-sm" style={{ color: 'var(--muted)' }}>
+              All sets from <strong>{exercise.name}</strong> will be moved to the exercise you choose, then this record will be deleted.
+            </p>
+            <input
+              type="text"
+              value={mergeSearch}
+              onChange={e => { setMergeSearch(e.target.value); setMergeTargetId(null) }}
+              placeholder="Search exercises…"
+              className="w-full px-3 py-2 rounded-lg border text-sm outline-none"
+              style={{ background: 'var(--background)', borderColor: 'var(--card-border)', color: 'var(--foreground)' }}
+            />
+            <div className="max-h-48 overflow-y-auto space-y-1">
+              {allExercises
+                .filter(e => e.name.toLowerCase().includes(mergeSearch.toLowerCase()))
+                .slice(0, 20)
+                .map(e => (
+                  <button key={e.id} onClick={() => setMergeTargetId(e.id)}
+                    className="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors"
+                    style={{
+                      background: mergeTargetId === e.id ? 'rgba(232,93,4,0.15)' : 'var(--background)',
+                      border: mergeTargetId === e.id ? '1px solid var(--accent)' : '1px solid transparent',
+                    }}>
+                    {e.name}
+                  </button>
+                ))}
+            </div>
+            {error && <p className="text-red-400 text-xs">{error}</p>}
+            <div className="flex gap-3">
+              <button onClick={() => { setShowMerge(false); setMergeSearch(''); setMergeTargetId(null) }}
+                className="flex-1 py-2 rounded-xl border text-sm font-medium"
+                style={{ borderColor: 'var(--card-border)', color: 'var(--muted)' }}>
+                Cancel
+              </button>
+              <button onClick={() => mergeTargetId && mergeInto(mergeTargetId)}
+                disabled={!mergeTargetId || merging}
+                className="flex-1 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-40"
+                style={{ background: 'var(--accent)' }}>
+                {merging ? 'Merging…' : 'Merge'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Delete confirmation dialog */}
       {deleteConfirmId && (

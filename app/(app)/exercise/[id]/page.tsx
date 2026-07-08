@@ -52,12 +52,18 @@ export default async function ExerciseDetailPage({ params }: { params: Promise<{
     volume: s.sets.reduce((sum, set) => sum + (set.weight_lbs ?? 0) * (set.reps ?? 0), 0),
   }))
 
+  const { data: allExercises } = await supabase
+    .from('exercises')
+    .select('id, name')
+    .order('name', { ascending: true })
+
   return (
     <ExerciseDetailClient
       exercise={exercise}
       sessions={sessions}
       progressData={progressData}
       exerciseId={id}
+      allExercises={(allExercises ?? []).filter(e => e.id !== id)}
     />
   )
 }
