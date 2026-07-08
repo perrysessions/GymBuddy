@@ -54,7 +54,7 @@ function sessionToEditState(s: SessionData): EditState {
 }
 
 export default function ExerciseDetailClient({ exercise, exerciseId, sessions: initialSessions, progressData: initialProgress }: Props) {
-  const [chart, setChart] = useState<'weight' | 'volume'>('weight')
+  const [chart, setChart] = useState<'weight' | 'volume' | 'avg_weight' | 'avg_reps'>('weight')
   const [sessions, setSessions] = useState<SessionData[]>(initialSessions)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editState, setEditState] = useState<EditState | null>(null)
@@ -67,12 +67,18 @@ export default function ExerciseDetailClient({ exercise, exerciseId, sessions: i
   const [bulkSaving, setBulkSaving] = useState(false)
   const supabase = createClient()
 
-  const progressData = sessions.map(s => ({
-    date: s.date,
-    max_weight: Math.max(0, ...s.sets.map(set => parseFloat(String(set.weight_lbs)) || 0)),
-    total_reps: s.sets.reduce((sum, set) => sum + (parseFloat(String(set.reps)) || 0), 0),
-    volume: s.sets.reduce((sum, set) => sum + (parseFloat(String(set.weight_lbs)) || 0) * (parseFloat(String(set.reps)) || 0), 0),
-  }))
+  const progressData = sessions.map(s => {
+    const weights = s.sets.map(set => parseFloat(String(set.weight_lbs)) || 0).filter(w => w > 0)
+    const reps = s.sets.map(set => parseFloat(String(set.reps)) || 0).filter(r => r > 0)
+    return {
+      date: s.date,
+      max_weight: weights.length > 0 ? Math.max(...weights) : 0,
+      avg_weight: weights.length > 0 ? Math.round((weights.reduce((a, b) => a + b, 0) / weights.length) * 10) / 10 : 0,
+      avg_reps: reps.length > 0 ? Math.round((reps.reduce((a, b) => a + b, 0) / reps.length) * 10) / 10 : 0,
+      total_reps: reps.reduce((sum, r) => sum + r, 0),
+      volume: s.sets.reduce((sum, set) => sum + (parseFloat(String(set.weight_lbs)) || 0) * (parseFloat(String(set.reps)) || 0), 0),
+    }
+  })
 
   const pr = progressData.length > 0 ? Math.max(...progressData.map(d => d.max_weight)) : null
 
@@ -233,12 +239,17 @@ export default function ExerciseDetailClient({ exercise, exerciseId, sessions: i
 
       {progressData.length > 1 && (
         <div className="rounded-xl border p-5" style={{ background: 'var(--card)', borderColor: 'var(--card-border)' }}>
-          <div className="flex gap-2 mb-4">
-            {(['weight', 'volume'] as const).map(c => (
+          <div className="flex flex-wrap gap-2 mb-4">
+            {([
+              ['weight', 'Max Weight'],
+              ['avg_weight', 'Avg Weight'],
+              ['avg_reps', 'Avg Reps'],
+              ['volume', 'Volume (lbs×reps)'],
+            ] as const).map(([c, label]) => (
               <button key={c} onClick={() => setChart(c)}
                 className="px-3 py-1 rounded-lg text-xs font-medium transition-colors"
                 style={{ background: chart === c ? 'var(--accent)' : 'var(--background)', color: chart === c ? '#fff' : 'var(--muted)' }}>
-                {c === 'weight' ? 'Max Weight' : 'Volume (lbs×reps)'}
+                {label}
               </button>
             ))}
           </div>
@@ -248,8 +259,13 @@ export default function ExerciseDetailClient({ exercise, exerciseId, sessions: i
               <XAxis dataKey="date" tickFormatter={formatDate} tick={{ fill: '#888', fontSize: 10 }} />
               <YAxis domain={['auto', 'auto']} tick={{ fill: '#888', fontSize: 11 }} />
               <Tooltip {...TOOLTIP} labelFormatter={(d: any) => formatDate(d)}
-                formatter={(v: any) => [chart === 'weight' ? `${v} lbs` : Number(v).toLocaleString(), chart === 'weight' ? 'Max weight' : 'Volume']} />
-              <Line type="monotone" dataKey={chart === 'weight' ? 'max_weight' : 'volume'}
+                formatter={(v: any) => {
+                  if (chart === 'volume') return [Number(v).toLocaleString(), 'Volume']
+                  if (chart === 'avg_reps') return [`${v} reps`, 'Avg reps']
+                  return [`${v} lbs`, chart === 'weight' ? 'Max weight' : 'Avg weight']
+                }} />
+              <Line type="monotone"
+                dataKey={chart === 'weight' ? 'max_weight' : chart === 'volume' ? 'volume' : chart === 'avg_weight' ? 'avg_weight' : 'avg_reps'}
                 stroke="var(--accent)" strokeWidth={2} dot={false} />
             </LineChart>
           </ResponsiveContainer>

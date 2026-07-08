@@ -8,7 +8,7 @@ import {
 } from 'recharts'
 
 interface Props {
-  allExerciseRows: { exerciseId: string; name: string; date: string; weight_lbs: number }[]
+  allExerciseRows: { exerciseId: string; name: string; date: string; weight_lbs: number; reps: number }[]
   recentSessions: { id: string; date: string; notes: string | null }[]
   bodyWeights: { date: string; weight_lbs: number }[]
 }
@@ -48,6 +48,7 @@ export default function DashboardClient({ allExerciseRows, recentSessions, bodyW
   const [sessionSearch, setSessionSearch] = useState('')
   const [exerciseDays, setExerciseDays] = useState(0)
   const [selectedExerciseId, setSelectedExerciseId] = useState<string | null>(null)
+  const [chartMetric, setChartMetric] = useState<'max_weight' | 'avg_weight' | 'avg_reps' | 'volume'>('max_weight')
 
   const priorityExercises = useMemo(() => {
     const cutoff = exerciseDays > 0
@@ -74,17 +75,28 @@ export default function DashboardClient({ allExerciseRows, recentSessions, bodyW
     const cutoff = exerciseDays > 0
       ? new Date(Date.now() - exerciseDays * 86400000).toISOString().split('T')[0]
       : ''
-    const byDate: Record<string, number> = {}
+    const byDate: Record<string, { weights: number[]; repsArr: number[] }> = {}
     for (const row of allExerciseRows) {
       if (row.exerciseId !== chartExerciseId) continue
       if (cutoff && row.date < cutoff) continue
-      if (!byDate[row.date] || row.weight_lbs > byDate[row.date]) {
-        byDate[row.date] = row.weight_lbs
-      }
+      if (!byDate[row.date]) byDate[row.date] = { weights: [], repsArr: [] }
+      if (row.weight_lbs > 0) byDate[row.date].weights.push(row.weight_lbs)
+      if (row.reps > 0) byDate[row.date].repsArr.push(row.reps)
     }
     return Object.entries(byDate)
       .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([date, max_weight]) => ({ date, max_weight }))
+      .map(([date, { weights, repsArr }]) => {
+        const avg_w = weights.length > 0 ? Math.round((weights.reduce((a, b) => a + b, 0) / weights.length) * 10) / 10 : 0
+        const avg_r = repsArr.length > 0 ? Math.round((repsArr.reduce((a, b) => a + b, 0) / repsArr.length) * 10) / 10 : 0
+        const max_w = weights.length > 0 ? Math.max(...weights) : 0
+        return {
+          date,
+          max_weight: max_w,
+          avg_weight: avg_w,
+          avg_reps: avg_r,
+          volume: weights.reduce((s, w, i) => s + w * (repsArr[i] ?? 0), 0),
+        }
+      })
   }, [allExerciseRows, chartExerciseId, exerciseDays])
 
   const filteredSessions = sessionSearch.trim()
@@ -123,10 +135,8 @@ export default function DashboardClient({ allExerciseRows, recentSessions, bodyW
       {/* Exercise chart — updates when top exercise is tapped, tap chart to go to detail */}
       {chartData.length > 0 && (
         <Card>
-          <div className="flex items-center justify-between mb-4">
-            <p className="text-base font-semibold" style={{ color: 'var(--muted)' }}>
-              {chartExerciseName} — Max Weight
-            </p>
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-base font-semibold" style={{ color: 'var(--muted)' }}>{chartExerciseName}</p>
             <button
               onClick={() => chartExerciseId && router.push(`/exercise/${chartExerciseId}`)}
               className="text-xs px-2.5 py-1 rounded-lg border"
@@ -134,14 +144,37 @@ export default function DashboardClient({ allExerciseRows, recentSessions, bodyW
               View full history →
             </button>
           </div>
+          <div className="flex flex-wrap gap-1.5 mb-3">
+            {([
+              ['max_weight', 'Max Weight'],
+              ['avg_weight', 'Avg Weight'],
+              ['avg_reps', 'Avg Reps'],
+              ['volume', 'Volume'],
+            ] as const).map(([key, label]) => (
+              <button key={key} onClick={() => setChartMetric(key)}
+                className="px-2.5 py-0.5 rounded text-xs font-medium transition-colors"
+                style={{
+                  background: chartMetric === key ? 'var(--accent)' : 'var(--background)',
+                  color: chartMetric === key ? '#fff' : 'var(--muted)',
+                }}>
+                {label}
+              </button>
+            ))}
+          </div>
           <div className="cursor-pointer" onClick={() => chartExerciseId && router.push(`/exercise/${chartExerciseId}`)}>
             <ResponsiveContainer width="100%" height={180}>
               <LineChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" />
                 <XAxis dataKey="date" tickFormatter={formatDate} tick={{ fill: '#888', fontSize: 11 }} />
-                <YAxis domain={['auto', 'auto']} tick={{ fill: '#888', fontSize: 11 }} unit=" lbs" />
-                <Tooltip {...CHART_TOOLTIP_STYLE} formatter={(v: any) => [`${v} lbs`, 'Max weight']} labelFormatter={(d: any) => formatDate(d)} />
-                <Line type="monotone" dataKey="max_weight" stroke="#e85d04" strokeWidth={2} dot={false} />
+                <YAxis domain={['auto', 'auto']} tick={{ fill: '#888', fontSize: 11 }} />
+                <Tooltip {...CHART_TOOLTIP_STYLE}
+                  labelFormatter={(d: any) => formatDate(d)}
+                  formatter={(v: any) => {
+                    if (chartMetric === 'avg_reps') return [`${v} reps`, 'Avg reps']
+                    if (chartMetric === 'volume') return [Number(v).toLocaleString(), 'Volume']
+                    return [`${v} lbs`, chartMetric === 'max_weight' ? 'Max weight' : 'Avg weight']
+                  }} />
+                <Line type="monotone" dataKey={chartMetric} stroke="#e85d04" strokeWidth={2} dot={false} />
               </LineChart>
             </ResponsiveContainer>
           </div>

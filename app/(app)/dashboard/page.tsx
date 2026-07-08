@@ -22,6 +22,7 @@ export default async function DashboardPage() {
       .select(`
         exercise_id,
         weight_lbs,
+        reps,
         exercises(id, name, category),
         workout_sessions!inner(user_id, date)
       `)
@@ -38,6 +39,7 @@ export default async function DashboardPage() {
     name: row.exercises?.name ?? 'Unknown',
     date: row.workout_sessions?.date ?? '',
     weight_lbs: row.weight_lbs ?? 0,
+    reps: row.reps ?? 0,
   }))
 
   // Recent sessions
