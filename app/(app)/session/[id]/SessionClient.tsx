@@ -96,7 +96,7 @@ export default function SessionClient({ session, exercises, compliments, bodyWei
                     <YAxis domain={['auto', 'auto']} tick={{ fill: '#888', fontSize: 10 }} axisLine={false} tickLine={false} width={36} />
                     <Tooltip
                       {...CHART_TOOLTIP_STYLE}
-                      formatter={(v: any, name: string) => [name === 'weight' ? `${v} lbs` : `${v} reps`, name === 'weight' ? 'Weight' : 'Reps']}
+                      formatter={(v: any, name: any) => [name === 'weight' ? `${v} lbs` : `${v} reps`, name === 'weight' ? 'Weight' : 'Reps']}
                     />
                     <Bar dataKey="weight" fill="#e85d04" radius={[3, 3, 0, 0]} />
                     <Bar dataKey="reps" fill="#4a4a6a" radius={[3, 3, 0, 0]} />
