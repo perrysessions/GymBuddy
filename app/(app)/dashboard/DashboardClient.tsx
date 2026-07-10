@@ -190,63 +190,6 @@ export default function DashboardClient({ allExerciseRows, recentSessions, bodyW
         </Link>
       </div>
 
-      {/* Body weight chart + log button */}
-      <Card>
-        <div className="flex items-center justify-between mb-4">
-          <SectionTitle>Body Weight</SectionTitle>
-          <button
-            onClick={() => setShowWeightForm(v => !v)}
-            className="text-xs px-3 py-1.5 rounded-lg border font-medium"
-            style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>
-            {showWeightForm ? 'Cancel' : '+ Log Weight'}
-          </button>
-        </div>
-
-        {showWeightForm && (
-          <div className="flex items-center gap-2 mb-4 flex-wrap">
-            <input
-              type="date"
-              value={weightDate}
-              onChange={e => setWeightDate(e.target.value)}
-              className="px-3 py-1.5 rounded-lg border text-sm outline-none"
-              style={{ background: 'var(--background)', borderColor: 'var(--card-border)', color: 'var(--foreground)' }}
-            />
-            <input
-              type="number"
-              step="0.1"
-              placeholder="lbs"
-              value={weightLbs}
-              onChange={e => setWeightLbs(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && saveWeight()}
-              className="w-24 px-3 py-1.5 rounded-lg border text-sm outline-none"
-              style={{ background: 'var(--background)', borderColor: 'var(--card-border)', color: 'var(--foreground)' }}
-            />
-            <button
-              onClick={saveWeight}
-              disabled={savingWeight || !weightLbs}
-              className="px-4 py-1.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50"
-              style={{ background: 'var(--accent)' }}>
-              {savingWeight ? 'Saving…' : 'Save'}
-            </button>
-            {weightError && <p className="text-red-400 text-xs w-full">{weightError}</p>}
-          </div>
-        )}
-
-        {bodyWeights.length > 0 ? (
-          <ResponsiveContainer width="100%" height={180}>
-            <LineChart data={bodyWeights}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" />
-              <XAxis dataKey="date" tickFormatter={formatDate} tick={{ fill: '#888', fontSize: 11 }} />
-              <YAxis domain={['auto', 'auto']} tick={{ fill: '#888', fontSize: 11 }} unit=" lbs" />
-              <Tooltip {...CHART_TOOLTIP_STYLE} formatter={(v: any) => [`${v} lbs`, 'Weight']} labelFormatter={(d: any) => formatDate(d)} />
-              <Line type="monotone" dataKey="weight_lbs" stroke="#f48c06" strokeWidth={2} dot={false} />
-            </LineChart>
-          </ResponsiveContainer>
-        ) : (
-          <p className="text-sm" style={{ color: 'var(--muted)' }}>No weight entries yet. Log your first one above.</p>
-        )}
-      </Card>
-
       {/* Exercise chart */}
       {chartData.length > 0 && (
         <Card>
@@ -420,6 +363,63 @@ export default function DashboardClient({ allExerciseRows, recentSessions, bodyW
           </ResponsiveContainer>
         </Card>
       )}
+
+      {/* Body weight chart + log button */}
+      <Card>
+        <div className="flex items-center justify-between mb-4">
+          <SectionTitle>Body Weight</SectionTitle>
+          <button
+            onClick={() => setShowWeightForm(v => !v)}
+            className="text-xs px-3 py-1.5 rounded-lg border font-medium"
+            style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>
+            {showWeightForm ? 'Cancel' : '+ Log Weight'}
+          </button>
+        </div>
+
+        {showWeightForm && (
+          <div className="flex items-center gap-2 mb-4 flex-wrap">
+            <input
+              type="date"
+              value={weightDate}
+              onChange={e => setWeightDate(e.target.value)}
+              className="px-3 py-1.5 rounded-lg border text-sm outline-none"
+              style={{ background: 'var(--background)', borderColor: 'var(--card-border)', color: 'var(--foreground)' }}
+            />
+            <input
+              type="number"
+              step="0.1"
+              placeholder="lbs"
+              value={weightLbs}
+              onChange={e => setWeightLbs(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && saveWeight()}
+              className="w-24 px-3 py-1.5 rounded-lg border text-sm outline-none"
+              style={{ background: 'var(--background)', borderColor: 'var(--card-border)', color: 'var(--foreground)' }}
+            />
+            <button
+              onClick={saveWeight}
+              disabled={savingWeight || !weightLbs}
+              className="px-4 py-1.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50"
+              style={{ background: 'var(--accent)' }}>
+              {savingWeight ? 'Saving…' : 'Save'}
+            </button>
+            {weightError && <p className="text-red-400 text-xs w-full">{weightError}</p>}
+          </div>
+        )}
+
+        {bodyWeights.length > 0 ? (
+          <ResponsiveContainer width="100%" height={180}>
+            <LineChart data={bodyWeights}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" />
+              <XAxis dataKey="date" tickFormatter={formatDate} tick={{ fill: '#888', fontSize: 11 }} />
+              <YAxis domain={['auto', 'auto']} tick={{ fill: '#888', fontSize: 11 }} unit=" lbs" />
+              <Tooltip {...CHART_TOOLTIP_STYLE} formatter={(v: any) => [`${v} lbs`, 'Weight']} labelFormatter={(d: any) => formatDate(d)} />
+              <Line type="monotone" dataKey="weight_lbs" stroke="#f48c06" strokeWidth={2} dot={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        ) : (
+          <p className="text-sm" style={{ color: 'var(--muted)' }}>No weight entries yet. Log your first one above.</p>
+        )}
+      </Card>
     </div>
   )
 }
