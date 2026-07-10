@@ -165,9 +165,8 @@ export default function DashboardClient({ allExerciseRows, recentSessions, bodyW
     setWeightError('')
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { setWeightError('Not logged in'); setSavingWeight(false); return }
-    const { error: e } = await supabase.from('body_weight').upsert(
-      { user_id: user.id, date: weightDate, weight_lbs: parseFloat(weightLbs) },
-      { onConflict: 'user_id,date' }
+    const { error: e } = await supabase.from('body_weight').insert(
+      { user_id: user.id, date: weightDate, weight_lbs: parseFloat(weightLbs) }
     )
     if (e) { setWeightError(e.message); setSavingWeight(false); return }
     // Update local state
