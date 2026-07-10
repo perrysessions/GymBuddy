@@ -1,7 +1,6 @@
 'use client'
 
 import Link from 'next/link'
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 
 interface ExerciseData {
   exerciseId: string
@@ -14,11 +13,6 @@ interface Props {
   exercises: ExerciseData[]
   compliments: string[]
   bodyWeight: number | null
-}
-
-const CHART_TOOLTIP_STYLE = {
-  contentStyle: { background: '#1a1a1a', border: '1px solid #2a2a2a', borderRadius: 8 },
-  labelStyle: { color: '#888' },
 }
 
 function formatDate(d: string) {
@@ -63,11 +57,6 @@ export default function SessionClient({ session, exercises, compliments, bodyWei
         const maxWeight = Math.max(...ex.sets.map(s => s.weight_lbs ?? 0))
         const totalReps = ex.sets.reduce((sum, s) => sum + (s.reps ?? 0), 0)
         const hasInjury = ex.sets.some(s => s.notes?.includes('⚠️'))
-        const chartData = ex.sets.map(s => ({
-          set: `S${s.set_number}`,
-          weight: s.weight_lbs ?? 0,
-          reps: s.reps ?? 0,
-        }))
 
         return (
           <div key={ex.exerciseId} className="rounded-xl border overflow-hidden"
@@ -85,25 +74,6 @@ export default function SessionClient({ session, exercises, compliments, bodyWei
                 <span><strong style={{ color: 'var(--foreground)' }}>{ex.sets.length}</strong> sets</span>
               </div>
             </div>
-
-            {/* Chart — only if 2+ sets with weight data */}
-            {chartData.length >= 2 && maxWeight > 0 && (
-              <div className="px-4 pt-3 pb-1">
-                <ResponsiveContainer width="100%" height={110}>
-                  <BarChart data={chartData} barGap={4}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" vertical={false} />
-                    <XAxis dataKey="set" tick={{ fill: '#888', fontSize: 11 }} axisLine={false} tickLine={false} />
-                    <YAxis domain={['auto', 'auto']} tick={{ fill: '#888', fontSize: 10 }} axisLine={false} tickLine={false} width={36} />
-                    <Tooltip
-                      {...CHART_TOOLTIP_STYLE}
-                      formatter={(v: any, name: any) => [name === 'weight' ? `${v} lbs` : `${v} reps`, name === 'weight' ? 'Weight' : 'Reps']}
-                    />
-                    <Bar dataKey="weight" fill="#e85d04" radius={[3, 3, 0, 0]} />
-                    <Bar dataKey="reps" fill="#4a4a6a" radius={[3, 3, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            )}
 
             {/* Set table */}
             <table className="w-full text-xs" style={{ borderTop: '1px solid var(--card-border)' }}>
