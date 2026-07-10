@@ -1,40 +1,52 @@
 # Gym Buddy — Project State
 
 ## Summary
-Personal workout tracking web app for Perry (perrysessions@gmail.com). Next.js 16 App Router + Supabase + Tailwind CSS v4 + Recharts + Google Gemini API (free tier). Runs locally at `localhost:3000` via `cd gym-buddy && npm run dev`. Not yet deployed to Vercel. All core features are built and working with 2+ years of real workout data imported.
+Personal workout tracking web app for Perry (perrysessions@gmail.com). Next.js 16 App Router + Supabase + Tailwind CSS v4 + Recharts + Google Gemini API (free tier). Live at **gym-buddy-livid.vercel.app** (GitHub repo: perrysessions/GymBuddy). Runs locally at `localhost:3000` via `cd gym-buddy && npm run dev`. Every `git push` to main auto-redeploys on Vercel.
 
-The import pipeline works as follows: paste Apple Notes text → client-side JS splits it into ~12k-char chunks by detecting exercise headers (using em-dash `–` at minimum indentation level) → each chunk sent as one Gemini API call to `gemini-2.5-flash` → compact JSON response remapped to full format → preview table → save to Supabase. The Gemini key is in `.env.local` as `GEMINI_API_KEY` (server-side only, never public). Do NOT use `responseMimeType: 'application/json'` in Gemini config — causes 429. Do NOT use a model fallback loop — wastes quota. One model, one call per chunk.
+The import pipeline supports two formats: (1) Apple Notes text with em-dash `–` exercise headers at minimum indentation, (2) plain text with exercise name on its own line and sessions starting with `Jan 3, 2025:` style dates. Client-side JS splits into ~12k-char chunks → each sent as one Gemini API call to `gemini-2.5-flash` → compact JSON remapped to full format → preview → save. Parse route auto-retries up to 3× on 503 with backoff. Do NOT use `responseMimeType: 'application/json'` — causes 429. Do NOT use a multi-model fallback loop.
 
-Data is fully imported. The main data quality issue is that some sessions got wrong years (e.g. 2025 vs 2026) during import. The exercise detail page has both per-session Edit mode (date, sets, weight, reps) and a Bulk Edit Years tool (checkboxes + year input + Apply) to fix this.
+Data is fully imported. Common issues: (1) wrong years from import — use Bulk Edit Years on exercise detail page; (2) duplicate exercise names from import — use Merge into… button on exercise detail page to consolidate all sets into one record.
 
 ## Stack & Key Files
-- `app/(app)/dashboard/` — Dashboard with bench press chart, body weight chart, Top Exercises (30d/90d/6mo/1yr/All toggle), Workouts list (all sessions, searchable, scrollable). Clicking a workout goes to `/session/[id]`.
-- `app/(app)/session/[id]/` — Session detail: date, compliments (PRs, first exercises, volume milestones), per-exercise bar charts + set tables.
-- `app/(app)/exercise/[id]/` — Exercise detail: max weight + volume charts, full session history with Edit button (inline editing of date/sets/weight/reps, add/delete sets) and Bulk Edit Years mode.
+- `app/(app)/dashboard/` — Dashboard: exercise line chart with 4-metric toggle (Max Weight / Avg Weight / Avg Reps / Volume), body weight chart, Top Exercises (all exercises scrollable, 30d/90d/6mo/1yr/All range toggle, tap to update chart), Workouts list (all sessions scrollable + searchable). Uses `force-dynamic` + `noStore()` + paginated Supabase queries (`.range()` loop, 1000 rows/page) — never use `.limit()` alone for large datasets.
+- `app/(app)/session/[id]/` — Session detail: date, PR compliments, per-exercise bar charts + set tables.
+- `app/(app)/exercise/[id]/` — Exercise detail: 4-metric chart toggle, full session history. Per session row: Edit (inline date/sets/weight/reps), Delete (confirmation dialog, removes sets for this exercise in that session), Bulk Edit Years (checkboxes + year input), Merge into… (search + select target exercise → moves all sets + deletes this exercise record → redirects to target).
 - `app/(app)/log/` — Log a workout manually.
-- `app/(app)/import/` — Paste notes → Prepare (auto-chunks) → Review chunks → Parse with AI → Preview → Save.
-- `app/(app)/chat/` — AI chat with Gemini. Shows daily usage bar (50 chat limit tracked in localStorage). Only visible if `user_profiles.is_ai_enabled = true`.
-- `app/api/chat/route.ts` — Gemini chat, checks is_ai_enabled server-side, injects 90-day workout context.
-- `app/api/parse-notes/route.ts` — Single Gemini call, compact JSON prompt, remaps short keys back to full format.
-- `components/Nav.tsx` — Desktop sidebar + mobile bottom bar. Hides AI Chat if !isAiEnabled.
+- `app/(app)/import/` — Paste notes → Prepare (auto-chunks, detects format) → Review chunks → Parse with AI → Preview → Save.
+- `app/(app)/chat/` — Persistent AI chat. Desktop: left sidebar with all sessions. Mobile: "☰ Chats" button opens bottom sheet. New Chat button, search, delete. Session title = first message. Messages persisted in `chat_sessions` + `chat_messages` Supabase tables. Daily usage bar (50-chat limit in localStorage). Only visible if `user_profiles.is_ai_enabled = true`.
+- `app/api/chat/route.ts` — Gemini chat (`gemini-2.5-flash`), checks is_ai_enabled server-side, injects 90-day workout context, try/catch returns JSON errors.
+- `app/api/parse-notes/route.ts` — Single Gemini call, compact JSON prompt, remaps short keys, retries on 503.
+- `app/login/page.tsx` — Log In / Sign Up / Forgot Password (Supabase reset email → `/reset-password`).
+- `app/reset-password/page.tsx` — Set new password after clicking email link.
+- `components/Nav.tsx` — Desktop sidebar + mobile bottom bar. Profile button (👤) opens popup/sheet with Change Password + Sign Out.
 - `lib/supabase.ts` / `lib/supabase-server.ts` — Browser and server Supabase clients.
 - `supabase-schema.sql` — Full schema (already run). `supabase-drop.sql` — drop script.
 
 ## Database
-Tables: `exercises`, `workout_sessions`, `workout_sets`, `body_weight`, `user_profiles`. All have RLS (users see only their own data). `reps` is `NUMERIC(4,1)` for half-rep support (e.g. 8.5). `user_profiles.is_ai_enabled` defaults false; a DB trigger sets it true for perrysessions@gmail.com on signup. If the profile row is missing (trigger didn't fire), run: `INSERT INTO user_profiles (id, email, is_ai_enabled) SELECT id, email, true FROM auth.users WHERE email = 'perrysessions@gmail.com';`
+Tables: `exercises`, `workout_sessions`, `workout_sets`, `body_weight`, `user_profiles`, `chat_sessions`, `chat_messages`. All have RLS. `reps` is `NUMERIC(4,1)` for half-rep support. `user_profiles.is_ai_enabled` defaults false; DB trigger sets true for perrysessions@gmail.com on signup. If profile row missing: `INSERT INTO user_profiles (id, email, is_ai_enabled) SELECT id, email, true FROM auth.users WHERE email = 'perrysessions@gmail.com';`
+
+`chat_sessions (id, user_id, title, created_at, updated_at)` — RLS: auth.uid() = user_id
+`chat_messages (id, session_id, role, content, created_at)` — RLS: session owned by user
+
+## Vercel Deployment
+Env vars in Vercel dashboard → Settings → Environment Variables:
+- `NEXT_PUBLIC_SUPABASE_URL` — public (safe)
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY` — public (safe, RLS protects data)
+- `GEMINI_API_KEY` — server-only, never reaches browser
+
+To do: add gym-buddy-livid.vercel.app to Supabase → Authentication → URL Configuration → Redirect URLs so forgot-password email links work.
 
 ## Rules
 - NEVER expose `GEMINI_API_KEY` — server-side only
-- NEVER use `responseMimeType: 'application/json'` in Gemini config
+- NEVER use `responseMimeType: 'application/json'` in Gemini config — causes 429
 - NEVER use a multi-model fallback loop — one model per call
 - Email confirmation is ON in Supabase (intentional)
 - JWT expiry set to max in Supabase Auth Settings
-- `devIndicators: false` in `next.config.ts` (removes the floating N dev badge)
-- Apple Notes uses `–` em-dashes, not `-` hyphens — import chunker handles this
-- Exercise headers in pasted notes are detected by minimum indentation level, not zero indent
+- `devIndicators: false` in `next.config.ts`
+- Apple Notes uses `–` em-dashes; plain text format uses `MonthName D, YYYY:` date prefixes
+- Dashboard Supabase query must use paginated `.range()` loop — server caps at 1000 rows per request
 
 ## What's Left
-1. Deploy to Vercel (add env vars: NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, GEMINI_API_KEY)
-2. Fix exercise names that have YouTube URLs embedded in them (import artifact — e.g. "Ab leg raises https://...")
+1. Add Vercel URL to Supabase redirect URLs (for forgot-password links)
+2. Fix exercise names with embedded YouTube URLs (import artifact)
 3. Body weight manual entry page (can view chart but can't add entries without importing)
-4. Data cleanup: some sessions have wrong years from import — use Bulk Edit Years on exercise pages to fix
