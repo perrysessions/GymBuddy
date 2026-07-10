@@ -1,8 +1,10 @@
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { redirect, notFound } from 'next/navigation'
+import { unstable_noStore as noStore } from 'next/cache'
 import ExerciseDetailClient from './ExerciseDetailClient'
 
 export default async function ExerciseDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  noStore()
   const { id } = await params
   const supabase = await createServerSupabaseClient()
   const { data: { user } } = await supabase.auth.getUser()

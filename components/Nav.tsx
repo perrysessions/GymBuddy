@@ -3,14 +3,17 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import {
+  LayoutDashboard, PenLine, Dumbbell, Bot, Upload, User, Sun, Moon,
+} from 'lucide-react'
 
 const links = [
-  { href: '/dashboard', label: 'Dashboard', icon: '📊' },
-  { href: '/log', label: 'Log', icon: '✏️' },
-  { href: '/exercise', label: 'Exercises', icon: '💪' },
-  { href: '/chat', label: 'AI Chat', icon: '🤖' },
-  { href: '/import', label: 'Import', icon: '📥' },
+  { href: '/dashboard', label: 'Dashboard', Icon: LayoutDashboard },
+  { href: '/log',       label: 'Log',       Icon: PenLine },
+  { href: '/exercise',  label: 'Exercises', Icon: Dumbbell },
+  { href: '/chat',      label: 'AI Chat',   Icon: Bot },
+  { href: '/import',    label: 'Import',    Icon: Upload },
 ]
 
 export default function Nav({ isAiEnabled }: { isAiEnabled: boolean }) {
@@ -18,6 +21,23 @@ export default function Nav({ isAiEnabled }: { isAiEnabled: boolean }) {
   const router = useRouter()
   const supabase = createClient()
   const [profileOpen, setProfileOpen] = useState(false)
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark')
+
+  useEffect(() => {
+    const saved = localStorage.getItem('theme')
+    if (saved === 'light') setTheme('light')
+  }, [])
+
+  function toggleTheme() {
+    const next = theme === 'dark' ? 'light' : 'dark'
+    setTheme(next)
+    localStorage.setItem('theme', next)
+    if (next === 'light') {
+      document.documentElement.setAttribute('data-theme', 'light')
+    } else {
+      document.documentElement.removeAttribute('data-theme')
+    }
+  }
   const [changingPw, setChangingPw] = useState(false)
   const [newPw, setNewPw] = useState('')
   const [confirmPw, setConfirmPw] = useState('')
@@ -59,42 +79,48 @@ export default function Nav({ isAiEnabled }: { isAiEnabled: boolean }) {
       {/* Desktop sidebar */}
       <nav className="hidden md:flex flex-col w-52 min-h-screen border-r px-3 py-6 shrink-0"
         style={{ background: 'var(--card)', borderColor: 'var(--card-border)' }}>
-        <div className="text-xl font-bold mb-8 px-2" style={{ color: 'var(--accent)' }}>🏋️ Gym Buddy</div>
+        <div className="flex items-center gap-2 text-xl font-bold mb-8 px-2" style={{ color: 'var(--accent)' }}>
+          <Dumbbell size={22} />
+          Gym Buddy
+        </div>
         <div className="flex flex-col gap-1 flex-1">
-          {visibleLinks.map(({ href, label, icon }) => (
-            <Link
-              key={href}
-              href={href}
-              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
+          {visibleLinks.map(({ href, label, Icon }) => (
+            <Link key={href} href={href}
+              className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
               style={{
                 background: pathname.startsWith(href) ? 'var(--accent)' : 'transparent',
                 color: pathname.startsWith(href) ? '#fff' : 'var(--muted)',
-              }}
-            >
-              <span>{icon}</span> {label}
+              }}>
+              <Icon size={16} />
+              {label}
             </Link>
           ))}
         </div>
         <div className="relative">
-          <button
-            onClick={() => setProfileOpen(v => !v)}
-            className="w-full text-sm px-3 py-2 rounded-lg text-left transition-colors flex items-center gap-2"
-            style={{ color: 'var(--muted)' }}
-          >
-            <span>👤</span> Profile
+          <button onClick={() => setProfileOpen(v => !v)}
+            className="w-full text-sm px-3 py-2 rounded-lg text-left transition-colors flex items-center gap-2.5"
+            style={{ color: 'var(--muted)' }}>
+            <User size={16} />
+            Profile
           </button>
           {profileOpen && (
             <div className="absolute bottom-full left-0 right-0 mb-1 rounded-xl border p-4 z-50"
               style={{ background: 'var(--card)', borderColor: 'var(--card-border)' }}>
               {!changingPw ? (
                 <div className="flex flex-col gap-2">
+                  <button onClick={toggleTheme}
+                    className="text-sm px-3 py-2 rounded-lg text-left hover:opacity-80 flex items-center gap-2"
+                    style={{ background: 'var(--background)', color: 'var(--foreground)' }}>
+                    {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
+                    {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
+                  </button>
                   <button onClick={() => setChangingPw(true)}
-                    className="text-sm px-3 py-2 rounded-lg text-left transition-colors hover:opacity-80"
+                    className="text-sm px-3 py-2 rounded-lg text-left hover:opacity-80"
                     style={{ background: 'var(--background)', color: 'var(--foreground)' }}>
                     Change Password
                   </button>
                   <button onClick={signOut}
-                    className="text-sm px-3 py-2 rounded-lg text-left transition-colors hover:opacity-80"
+                    className="text-sm px-3 py-2 rounded-lg text-left hover:opacity-80"
                     style={{ background: 'var(--background)', color: '#ef4444' }}>
                     Sign Out
                   </button>
@@ -136,23 +162,18 @@ export default function Nav({ isAiEnabled }: { isAiEnabled: boolean }) {
       {/* Mobile bottom bar */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 border-t flex justify-around py-2 z-50"
         style={{ background: 'var(--card)', borderColor: 'var(--card-border)' }}>
-        {visibleLinks.map(({ href, label, icon }) => (
-          <Link
-            key={href}
-            href={href}
+        {visibleLinks.map(({ href, label, Icon }) => (
+          <Link key={href} href={href}
             className="flex flex-col items-center gap-0.5 text-xs px-2"
-            style={{ color: pathname.startsWith(href) ? 'var(--accent)' : 'var(--muted)' }}
-          >
-            <span className="text-lg">{icon}</span>
+            style={{ color: pathname.startsWith(href) ? 'var(--accent)' : 'var(--muted)' }}>
+            <Icon size={20} />
             {label}
           </Link>
         ))}
-        <button
-          onClick={() => setProfileOpen(v => !v)}
+        <button onClick={() => setProfileOpen(v => !v)}
           className="flex flex-col items-center gap-0.5 text-xs px-2"
-          style={{ color: 'var(--muted)' }}
-        >
-          <span className="text-lg">👤</span>
+          style={{ color: 'var(--muted)' }}>
+          <User size={20} />
           Profile
         </button>
       </nav>
@@ -166,6 +187,12 @@ export default function Nav({ isAiEnabled }: { isAiEnabled: boolean }) {
             <h3 className="text-base font-semibold mb-4">Profile</h3>
             {!changingPw ? (
               <div className="flex flex-col gap-3">
+                <button onClick={toggleTheme}
+                  className="w-full text-sm px-4 py-3 rounded-xl text-left font-medium flex items-center gap-2"
+                  style={{ background: 'var(--background)', color: 'var(--foreground)' }}>
+                  {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+                  {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
+                </button>
                 <button onClick={() => setChangingPw(true)}
                   className="w-full text-sm px-4 py-3 rounded-xl text-left font-medium"
                   style={{ background: 'var(--background)', color: 'var(--foreground)' }}>

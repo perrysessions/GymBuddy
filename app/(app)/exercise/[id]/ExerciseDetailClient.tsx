@@ -546,6 +546,24 @@ export default function ExerciseDetailClient({ exercise, exerciseId, sessions: i
         })}
       </div>
 
+      {sessions.length === 0 && (
+        <div className="rounded-xl border p-6 text-center space-y-3"
+          style={{ background: 'var(--card)', borderColor: 'var(--card-border)' }}>
+          <p className="text-sm" style={{ color: 'var(--muted)' }}>No sessions logged for this exercise.</p>
+          <button
+            onClick={async () => {
+              if (!confirm(`Delete "${nameValue}"? This cannot be undone.`)) return
+              await supabase.from('exercises').delete().eq('id', exerciseId)
+              router.push('/exercise')
+              router.refresh()
+            }}
+            className="text-sm px-4 py-2 rounded-lg border"
+            style={{ borderColor: '#ef4444', color: '#ef4444' }}>
+            Delete this exercise
+          </button>
+        </div>
+      )}
+
       {/* Merge dialog */}
       {showMerge && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4">

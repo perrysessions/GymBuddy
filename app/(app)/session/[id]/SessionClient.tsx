@@ -49,6 +49,10 @@ export default function SessionClient({ session, exercises: initialExercises, co
   const [deletingExId, setDeletingExId] = useState<string | null>(null)
   const [showDeleteSession, setShowDeleteSession] = useState(false)
   const [deletingSession, setDeletingSession] = useState(false)
+  const [showMerge, setShowMerge] = useState(false)
+  const [mergeSessions, setMergeSessions] = useState<{ id: string; date: string; notes: string | null; exercise_names: string[] }[]>([])
+  const [mergeTarget, setMergeTarget] = useState<string | null>(null)
+  const [merging, setMerging] = useState(false)
   const [error, setError] = useState('')
 
   function startEdit(ex: ExerciseData) {
@@ -135,6 +139,54 @@ export default function SessionClient({ session, exercises: initialExercises, co
     setDeletingExId(null)
   }
 
+  async function openMerge() {
+    setError('')
+    const { data } = await supabase
+      .from('workout_sessions')
+      .select('id, date, notes')
+      .eq('date', session.date)
+      .neq('id', session.id)
+      .order('id', { ascending: true })
+    if (!data || data.length === 0) {
+      setError('No other workouts found on this date to merge into.')
+      return
+    }
+    // Get exercise counts for each candidate
+    const withCounts = await Promise.all(data.map(async s => {
+      const { data: rows } = await supabase
+        .from('workout_sets')
+        .select('exercise_id, exercises(name)')
+        .eq('session_id', s.id)
+      const seen = new Set<string>()
+      const names: string[] = []
+      for (const r of rows ?? []) {
+        if (!seen.has(r.exercise_id)) {
+          seen.add(r.exercise_id)
+          const n = (r.exercises as { name: string } | null)?.name
+          if (n) names.push(n)
+        }
+      }
+      return { ...s, exercise_names: names, date: s.date }
+    }))
+    setMergeSessions(withCounts)
+    setMergeTarget(withCounts[0]?.id ?? null)
+    setShowMerge(true)
+  }
+
+  async function mergeSession() {
+    if (!mergeTarget) return
+    setMerging(true)
+    setError('')
+    const { error: e } = await supabase
+      .from('workout_sets')
+      .update({ session_id: mergeTarget })
+      .eq('session_id', session.id)
+    if (e) { setError(e.message); setMerging(false); return }
+    await supabase.from('workout_sessions').delete().eq('id', session.id)
+    router.push(`/session/${mergeTarget}`)
+    router.refresh()
+  }
+
   async function deleteSession() {
     setDeletingSession(true)
     // Delete sets first, then session
@@ -166,6 +218,12 @@ export default function SessionClient({ session, exercises: initialExercises, co
             <p className="text-2xl font-bold" style={{ color: 'var(--accent)' }}>{exercises.length}</p>
             <p className="text-xs" style={{ color: 'var(--muted)' }}>exercises</p>
           </div>
+          <button
+            onClick={openMerge}
+            className="text-xs px-3 py-1.5 rounded-lg border"
+            style={{ borderColor: 'var(--card-border)', color: 'var(--muted)' }}>
+            Merge into...
+          </button>
           <button
             onClick={() => setShowDeleteSession(true)}
             className="text-xs px-3 py-1.5 rounded-lg border"
@@ -301,6 +359,46 @@ export default function SessionClient({ session, exercises: initialExercises, co
           </div>
         )
       })}
+
+      {/* Merge session modal */}
+      {showMerge && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+          <div className="absolute inset-0 bg-black/60" onClick={() => setShowMerge(false)} />
+          <div className="relative rounded-2xl border p-6 w-full max-w-sm space-y-4"
+            style={{ background: 'var(--card)', borderColor: 'var(--card-border)' }}>
+            <h3 className="text-base font-semibold">Merge into another workout</h3>
+            <p className="text-sm" style={{ color: 'var(--muted)' }}>
+              All sets from <strong>{formatDate(session.date)}</strong> will be moved into the selected workout, then this one will be deleted.
+            </p>
+            <div className="space-y-2">
+              {mergeSessions.map(s => (
+                <label key={s.id} className="flex items-start gap-3 p-3 rounded-xl border cursor-pointer"
+                  style={{ borderColor: mergeTarget === s.id ? 'var(--accent)' : 'var(--card-border)', background: 'var(--background)' }}>
+                  <input type="radio" name="merge-target" value={s.id} checked={mergeTarget === s.id}
+                    onChange={() => setMergeTarget(s.id)} className="accent-orange-500 mt-0.5 shrink-0" />
+                  <span className="text-sm">
+                    <span className="font-semibold block">{formatDate(s.date)}{s.notes ? ` · ${s.notes}` : ''}</span>
+                    <span style={{ color: 'var(--muted)' }}>{s.exercise_names.length} exercise{s.exercise_names.length !== 1 ? 's' : ''}: {s.exercise_names.join(', ')}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+            {error && <p className="text-red-400 text-xs">{error}</p>}
+            <div className="flex gap-3">
+              <button onClick={() => setShowMerge(false)}
+                className="flex-1 py-2 rounded-xl border text-sm font-medium"
+                style={{ borderColor: 'var(--card-border)', color: 'var(--muted)' }}>
+                Cancel
+              </button>
+              <button onClick={mergeSession} disabled={merging || !mergeTarget}
+                className="flex-1 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
+                style={{ background: 'var(--accent)' }}>
+                {merging ? 'Merging...' : 'Merge'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Delete session confirmation */}
       {showDeleteSession && (

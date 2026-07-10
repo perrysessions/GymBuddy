@@ -44,9 +44,7 @@ function formatDate(d: string) {
   return new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
-// Return ISO week label like "Jun 30"
 function weekLabel(date: Date) {
-  // Monday of the week
   const d = new Date(date)
   const day = d.getDay()
   const diff = d.getDate() - day + (day === 0 ? -6 : 1)
@@ -57,6 +55,16 @@ function weekLabel(date: Date) {
 const UPPER_CATS = new Set(['upper'])
 const LOWER_CATS = new Set(['lower', 'legs'])
 
+type CorrMetric = 'weight' | 'sessions' | 'volume' | 'reps' | 'sets'
+
+const CORR_METRICS: { key: CorrMetric; label: string; color: string }[] = [
+  { key: 'sessions', label: 'Sessions/week',    color: '#e85d04' },
+  { key: 'volume',   label: 'Avg Volume',       color: '#4ade80' },
+  { key: 'reps',     label: 'Avg Reps',         color: '#60a5fa' },
+  { key: 'sets',     label: 'Avg Sets/workout', color: '#c084fc' },
+  { key: 'weight',   label: 'Body Weight',      color: '#f48c06' },
+]
+
 export default function DashboardClient({ allExerciseRows, recentSessions, bodyWeights: initialBodyWeights }: Props) {
   const router = useRouter()
   const supabase = createClient()
@@ -64,13 +72,13 @@ export default function DashboardClient({ allExerciseRows, recentSessions, bodyW
   const [exerciseDays, setExerciseDays] = useState(0)
   const [selectedExerciseId, setSelectedExerciseId] = useState<string | null>(null)
   const [chartMetric, setChartMetric] = useState<'max_weight' | 'avg_weight' | 'avg_reps' | 'volume'>('max_weight')
-  // Body weight log
   const [bodyWeights, setBodyWeights] = useState(initialBodyWeights)
   const [showWeightForm, setShowWeightForm] = useState(false)
   const [weightDate, setWeightDate] = useState(new Date().toISOString().split('T')[0])
   const [weightLbs, setWeightLbs] = useState('')
   const [savingWeight, setSavingWeight] = useState(false)
   const [weightError, setWeightError] = useState('')
+  const [corrEnabled, setCorrEnabled] = useState<Set<CorrMetric>>(new Set(['sessions', 'volume']))
 
   const priorityExercises = useMemo(() => {
     const cutoff = exerciseDays > 0
@@ -119,32 +127,6 @@ export default function DashboardClient({ allExerciseRows, recentSessions, bodyW
       })
   }, [allExerciseRows, chartExerciseId, exerciseDays])
 
-  // Combined weekly chart: sessions/week + avg body weight/week (last 26 weeks)
-  const combinedWeeklyData = useMemo(() => {
-    const cutoff = new Date(Date.now() - 26 * 7 * 86400000).toISOString().split('T')[0]
-    const weekSessions: Record<string, number> = {}
-    const weekWeights: Record<string, number[]> = {}
-    for (const s of recentSessions) {
-      if (s.date < cutoff) continue
-      const wk = weekLabel(new Date(s.date + 'T00:00:00'))
-      weekSessions[wk] = (weekSessions[wk] ?? 0) + 1
-    }
-    for (const bw of bodyWeights) {
-      if (bw.date < cutoff) continue
-      const wk = weekLabel(new Date(bw.date + 'T00:00:00'))
-      if (!weekWeights[wk]) weekWeights[wk] = []
-      weekWeights[wk].push(bw.weight_lbs)
-    }
-    const allWeeks = new Set([...Object.keys(weekSessions), ...Object.keys(weekWeights)])
-    return Array.from(allWeeks).sort().map(week => ({
-      week,
-      sessions: weekSessions[week] ?? 0,
-      weight: weekWeights[week]
-        ? Math.round((weekWeights[week].reduce((a, b) => a + b, 0) / weekWeights[week].length) * 10) / 10
-        : null,
-    }))
-  }, [recentSessions, bodyWeights])
-
   // Upper / Lower volume per week (last 26 weeks)
   const splitData = useMemo(() => {
     const cutoff = new Date(Date.now() - 26 * 7 * 86400000).toISOString().split('T')[0]
@@ -162,6 +144,99 @@ export default function DashboardClient({ allExerciseRows, recentSessions, bodyW
   }, [allExerciseRows])
 
   const hasAnySplitData = splitData.some(d => d.upper > 0 || d.lower > 0)
+
+  // Body weight chart data (raw daily)
+  const bwChartData = useMemo(() => {
+    return [...bodyWeights]
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .map(bw => ({ date: bw.date, weight: bw.weight_lbs }))
+  }, [bodyWeights])
+
+  // Sessions per week (last 26 weeks)
+  const freqData = useMemo(() => {
+    const cutoff = new Date(Date.now() - 26 * 7 * 86400000).toISOString().split('T')[0]
+    const weekSessions: Record<string, number> = {}
+    for (const s of recentSessions) {
+      if (s.date < cutoff) continue
+      const wk = weekLabel(new Date(s.date + 'T00:00:00'))
+      weekSessions[wk] = (weekSessions[wk] ?? 0) + 1
+    }
+    return Object.entries(weekSessions)
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([week, sessions]) => ({ week, sessions }))
+  }, [recentSessions])
+
+  // Correlation chart: all metrics normalized 0-100%, last 26 weeks
+  const corrData = useMemo(() => {
+    const cutoff = new Date(Date.now() - 26 * 7 * 86400000).toISOString().split('T')[0]
+
+    const weekSessions: Record<string, number> = {}
+    const weekVolume: Record<string, number[]> = {}
+    const weekReps: Record<string, number[]> = {}
+    const weekSets: Record<string, number> = {}
+    const weekWeights: Record<string, number[]> = {}
+
+    for (const s of recentSessions) {
+      if (s.date < cutoff) continue
+      const wk = weekLabel(new Date(s.date + 'T00:00:00'))
+      weekSessions[wk] = (weekSessions[wk] ?? 0) + 1
+    }
+
+    for (const row of allExerciseRows) {
+      if (row.date < cutoff) continue
+      const wk = weekLabel(new Date(row.date + 'T00:00:00'))
+      if (row.weight_lbs > 0 && row.reps > 0) {
+        if (!weekVolume[wk]) weekVolume[wk] = []
+        weekVolume[wk].push(row.weight_lbs * row.reps)
+      }
+      if (row.reps > 0) {
+        if (!weekReps[wk]) weekReps[wk] = []
+        weekReps[wk].push(row.reps)
+      }
+      if (!weekSets[wk]) weekSets[wk] = 0
+      weekSets[wk]++
+    }
+
+    for (const bw of bodyWeights) {
+      if (bw.date < cutoff) continue
+      const wk = weekLabel(new Date(bw.date + 'T00:00:00'))
+      if (!weekWeights[wk]) weekWeights[wk] = []
+      weekWeights[wk].push(bw.weight_lbs)
+    }
+
+    const allWeeks = new Set([
+      ...Object.keys(weekSessions),
+      ...Object.keys(weekVolume),
+      ...Object.keys(weekWeights),
+    ])
+
+    const raw = Array.from(allWeeks).sort().map(wk => {
+      const sessCount = weekSessions[wk] ?? 0
+      const vol = weekVolume[wk] ? weekVolume[wk].reduce((a, b) => a + b, 0) / weekVolume[wk].length : null
+      const reps = weekReps[wk] ? weekReps[wk].reduce((a, b) => a + b, 0) / weekReps[wk].length : null
+      const sets = weekSessions[wk] ? (weekSets[wk] ?? 0) / weekSessions[wk] : null
+      const weight = weekWeights[wk]
+        ? weekWeights[wk].reduce((a, b) => a + b, 0) / weekWeights[wk].length
+        : null
+      return { week: wk, sessions: sessCount, volume: vol, reps, sets, weight }
+    })
+
+    // Find all-time maxes for normalization
+    const maxSessions = Math.max(...raw.map(r => r.sessions), 1)
+    const maxVolume   = Math.max(...raw.map(r => r.volume  ?? 0), 1)
+    const maxReps     = Math.max(...raw.map(r => r.reps    ?? 0), 1)
+    const maxSets     = Math.max(...raw.map(r => r.sets    ?? 0), 1)
+    const maxWeight   = Math.max(...raw.map(r => r.weight  ?? 0), 1)
+
+    return raw.map(r => ({
+      week: r.week,
+      sessions: Math.round((r.sessions / maxSessions) * 100),
+      volume:   r.volume  != null ? Math.round((r.volume  / maxVolume)  * 100) : null,
+      reps:     r.reps    != null ? Math.round((r.reps    / maxReps)    * 100) : null,
+      sets:     r.sets    != null ? Math.round((r.sets    / maxSets)    * 100) : null,
+      weight:   r.weight  != null ? Math.round((r.weight  / maxWeight)  * 100) : null,
+    }))
+  }, [recentSessions, allExerciseRows, bodyWeights])
 
   const filteredSessions = sessionSearch.trim()
     ? recentSessions.filter(s =>
@@ -181,7 +256,6 @@ export default function DashboardClient({ allExerciseRows, recentSessions, bodyW
       { user_id: user.id, date: weightDate, weight_lbs: parseFloat(weightLbs) }
     )
     if (e) { setWeightError(e.message); setSavingWeight(false); return }
-    // Update local state
     setBodyWeights(prev => {
       const next = prev.filter(bw => bw.date !== weightDate)
       return [...next, { date: weightDate, weight_lbs: parseFloat(weightLbs) }].sort((a, b) => a.date.localeCompare(b.date))
@@ -189,6 +263,14 @@ export default function DashboardClient({ allExerciseRows, recentSessions, bodyW
     setWeightLbs('')
     setShowWeightForm(false)
     setSavingWeight(false)
+  }
+
+  function toggleCorr(key: CorrMetric) {
+    setCorrEnabled(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) { next.delete(key) } else { next.add(key) }
+      return next
+    })
   }
 
   return (
@@ -273,7 +355,7 @@ export default function DashboardClient({ allExerciseRows, recentSessions, bodyW
               No data for this period. <Link href="/import" className="underline" style={{ color: 'var(--accent)' }}>Import your notes</Link> or <Link href="/log" className="underline" style={{ color: 'var(--accent)' }}>log a workout</Link>.
             </p>
           ) : (
-            <div className="space-y-2 overflow-y-auto max-h-96 pr-1">
+            <div className="space-y-2 overflow-y-auto max-h-64 pr-1">
               {priorityExercises.map((ex) => {
                 const isSelected = (selectedExerciseId ?? priorityExercises[0]?.id) === ex.id
                 return (
@@ -315,7 +397,7 @@ export default function DashboardClient({ allExerciseRows, recentSessions, bodyW
           {recentSessions.length === 0 ? (
             <p className="text-sm" style={{ color: 'var(--muted)' }}>No sessions yet.</p>
           ) : (
-            <div className="space-y-2 overflow-y-auto max-h-96 pr-1">
+            <div className="space-y-2 overflow-y-auto max-h-64 pr-1">
               {filteredSessions.length === 0 && (
                 <p className="text-sm" style={{ color: 'var(--muted)' }}>No workouts match.</p>
               )}
@@ -357,62 +439,121 @@ export default function DashboardClient({ allExerciseRows, recentSessions, bodyW
         </Card>
       )}
 
-      {/* Combined body weight + workout frequency */}
-      {combinedWeeklyData.length > 0 && (
-        <Card>
-          <div className="flex items-center justify-between mb-1">
-            <SectionTitle>Body Weight &amp; Workout Frequency</SectionTitle>
-            <button
-              onClick={() => setShowWeightForm(v => !v)}
-              className="text-xs px-3 py-1.5 rounded-lg border font-medium mb-3"
-              style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>
-              {showWeightForm ? 'Cancel' : '+ Log Weight'}
+      {/* Chart 1: Body Weight */}
+      <Card>
+        <div className="flex items-center justify-between mb-1">
+          <SectionTitle>Body Weight</SectionTitle>
+          <button
+            onClick={() => setShowWeightForm(v => !v)}
+            className="text-xs px-3 py-1.5 rounded-lg border font-medium mb-3"
+            style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>
+            {showWeightForm ? 'Cancel' : '+ Log Weight'}
+          </button>
+        </div>
+
+        {showWeightForm && (
+          <div className="flex items-center gap-2 mb-4 flex-wrap">
+            <input type="date" value={weightDate} onChange={e => setWeightDate(e.target.value)}
+              className="px-3 py-1.5 rounded-lg border text-sm outline-none"
+              style={{ background: 'var(--background)', borderColor: 'var(--card-border)', color: 'var(--foreground)' }} />
+            <input type="number" step="0.1" placeholder="lbs" value={weightLbs}
+              onChange={e => setWeightLbs(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && saveWeight()}
+              className="w-24 px-3 py-1.5 rounded-lg border text-sm outline-none"
+              style={{ background: 'var(--background)', borderColor: 'var(--card-border)', color: 'var(--foreground)' }} />
+            <button onClick={saveWeight} disabled={savingWeight || !weightLbs}
+              className="px-4 py-1.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50"
+              style={{ background: 'var(--accent)' }}>
+              {savingWeight ? 'Saving…' : 'Save'}
             </button>
+            {weightError && <p className="text-red-400 text-xs w-full">{weightError}</p>}
           </div>
+        )}
 
-          {showWeightForm && (
-            <div className="flex items-center gap-2 mb-4 flex-wrap">
-              <input type="date" value={weightDate} onChange={e => setWeightDate(e.target.value)}
-                className="px-3 py-1.5 rounded-lg border text-sm outline-none"
-                style={{ background: 'var(--background)', borderColor: 'var(--card-border)', color: 'var(--foreground)' }} />
-              <input type="number" step="0.1" placeholder="lbs" value={weightLbs}
-                onChange={e => setWeightLbs(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && saveWeight()}
-                className="w-24 px-3 py-1.5 rounded-lg border text-sm outline-none"
-                style={{ background: 'var(--background)', borderColor: 'var(--card-border)', color: 'var(--foreground)' }} />
-              <button onClick={saveWeight} disabled={savingWeight || !weightLbs}
-                className="px-4 py-1.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50"
-                style={{ background: 'var(--accent)' }}>
-                {savingWeight ? 'Saving…' : 'Save'}
-              </button>
-              {weightError && <p className="text-red-400 text-xs w-full">{weightError}</p>}
-            </div>
-          )}
+        {bwChartData.length > 0 ? (
+          <ResponsiveContainer width="100%" height={180}>
+            <LineChart data={bwChartData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" vertical={false} />
+              <XAxis dataKey="date" tickFormatter={formatDate} tick={{ fill: '#888', fontSize: 10 }} />
+              <YAxis domain={['auto', 'auto']} tick={{ fill: '#888', fontSize: 11 }} unit=" lbs" width={52} />
+              <Tooltip
+                {...CHART_TOOLTIP_STYLE}
+                labelFormatter={d => formatDate(d as string)}
+                formatter={(v: any) => [`${v} lbs`, 'Body weight']}
+              />
+              <Line type="monotone" dataKey="weight" stroke="#f48c06" strokeWidth={2} dot={{ r: 3, fill: '#f48c06' }} connectNulls />
+            </LineChart>
+          </ResponsiveContainer>
+        ) : (
+          <p className="text-sm" style={{ color: 'var(--muted)' }}>No weight entries yet — log your first one above.</p>
+        )}
+      </Card>
 
-          <div className="flex gap-4 text-xs mb-3" style={{ color: 'var(--muted)' }}>
-            <span><span style={{ color: '#f48c06' }}>●</span> Body weight (lbs, left)</span>
-            <span><span style={{ color: '#e85d04' }}>▌</span> Sessions/week (right)</span>
-          </div>
-
-          <ResponsiveContainer width="100%" height={200}>
-            <ComposedChart data={combinedWeeklyData}>
+      {/* Chart 2: Sessions per week */}
+      {freqData.length > 0 && (
+        <Card>
+          <SectionTitle>Workout Frequency (last 6 months)</SectionTitle>
+          <ResponsiveContainer width="100%" height={180}>
+            <LineChart data={freqData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" vertical={false} />
               <XAxis dataKey="week" tickFormatter={d => formatDate(d)} tick={{ fill: '#888', fontSize: 10 }} />
-              <YAxis yAxisId="weight" domain={['auto', 'auto']} tick={{ fill: '#888', fontSize: 11 }} unit=" lbs" width={52} />
-              <YAxis yAxisId="sessions" orientation="right" allowDecimals={false} tick={{ fill: '#888', fontSize: 11 }} width={28} />
+              <YAxis allowDecimals={false} tick={{ fill: '#888', fontSize: 11 }} />
               <Tooltip
                 {...CHART_TOOLTIP_STYLE}
                 labelFormatter={d => `Week of ${formatDate(d as string)}`}
-                formatter={(v: any, name: any) => name === 'weight' ? [`${v} lbs`, 'Body weight'] : [v, 'Sessions']}
+                formatter={(v: any) => [v, 'Sessions']}
               />
-              <Bar yAxisId="sessions" dataKey="sessions" fill="#e85d04" opacity={0.5} barSize={14} radius={[3, 3, 0, 0]} />
-              <Line yAxisId="weight" type="monotone" dataKey="weight" stroke="#f48c06" strokeWidth={2} dot={false} connectNulls />
-            </ComposedChart>
+              <Line type="monotone" dataKey="sessions" stroke="#e85d04" strokeWidth={2} dot={{ r: 3, fill: '#e85d04' }} />
+            </LineChart>
           </ResponsiveContainer>
+        </Card>
+      )}
 
-          {bodyWeights.length === 0 && (
-            <p className="text-xs mt-2" style={{ color: 'var(--muted)' }}>No weight entries yet — log your first one above.</p>
-          )}
+      {/* Chart 3: Correlation chart */}
+      {corrData.length > 0 && (
+        <Card>
+          <div className="mb-4">
+            <SectionTitle>Correlation (last 6 months)</SectionTitle>
+            <p className="text-xs -mt-2 mb-3" style={{ color: 'var(--muted)' }}>
+              All metrics normalized to 0–100% of their all-time peak. Toggle to compare trends.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {CORR_METRICS.map(({ key, label, color }) => {
+                const active = corrEnabled.has(key)
+                return (
+                  <button key={key} onClick={() => toggleCorr(key)}
+                    className="px-3 py-1 rounded-full text-xs font-medium border transition-all"
+                    style={{
+                      background: active ? color + '22' : 'transparent',
+                      borderColor: active ? color : 'var(--card-border)',
+                      color: active ? color : 'var(--muted)',
+                    }}>
+                    {label}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+          <ResponsiveContainer width="100%" height={220}>
+            <LineChart data={corrData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" vertical={false} />
+              <XAxis dataKey="week" tickFormatter={d => formatDate(d)} tick={{ fill: '#888', fontSize: 10 }} />
+              <YAxis domain={[0, 100]} tick={{ fill: '#888', fontSize: 11 }} unit="%" />
+              <Tooltip
+                {...CHART_TOOLTIP_STYLE}
+                labelFormatter={d => `Week of ${formatDate(d as string)}`}
+                formatter={(v: any, name: any) => {
+                  const m = CORR_METRICS.find(m => m.key === name)
+                  return [`${v}%`, m?.label ?? name]
+                }}
+              />
+              {CORR_METRICS.map(({ key, color }) =>
+                corrEnabled.has(key) ? (
+                  <Line key={key} type="monotone" dataKey={key} stroke={color} strokeWidth={2} dot={false} connectNulls />
+                ) : null
+              )}
+            </LineChart>
+          </ResponsiveContainer>
         </Card>
       )}
     </div>

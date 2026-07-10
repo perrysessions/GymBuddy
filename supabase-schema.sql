@@ -99,5 +99,9 @@ create policy "read exercises" on exercises
   for select using (true);
 create policy "insert exercises" on exercises
   for insert with check (auth.uid() is not null);
+create policy "update exercises" on exercises
+  for update using (auth.uid() is not null);
+create policy "delete exercises" on exercises
+  for delete using (auth.uid() is not null);
 
 alter table exercises enable row level security;
