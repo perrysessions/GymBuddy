@@ -162,7 +162,8 @@ export default function SessionClient({ session, exercises: initialExercises, co
       for (const r of rows ?? []) {
         if (!seen.has(r.exercise_id)) {
           seen.add(r.exercise_id)
-          const n = (r.exercises as { name: string } | null)?.name
+          const ex = r.exercises as unknown as { name: string } | { name: string }[] | null
+          const n = Array.isArray(ex) ? ex[0]?.name : ex?.name
           if (n) names.push(n)
         }
       }
