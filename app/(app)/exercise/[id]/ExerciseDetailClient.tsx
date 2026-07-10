@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { createClient } from '@/lib/supabase'
 
@@ -55,6 +56,8 @@ function sessionToEditState(s: SessionData): EditState {
   }
 }
 
+const CATEGORIES = ['upper', 'lower', 'core', 'cardio', 'other']
+
 export default function ExerciseDetailClient({ exercise, exerciseId, sessions: initialSessions, progressData: initialProgress, allExercises }: Props) {
   const [chart, setChart] = useState<'weight' | 'volume' | 'avg_weight' | 'avg_reps'>('weight')
   const [sessions, setSessions] = useState<SessionData[]>(initialSessions)
@@ -73,6 +76,13 @@ export default function ExerciseDetailClient({ exercise, exerciseId, sessions: i
   const [mergeSearch, setMergeSearch] = useState('')
   const [mergeTargetId, setMergeTargetId] = useState<string | null>(null)
   const [merging, setMerging] = useState(false)
+  // Name editing
+  const [editingName, setEditingName] = useState(false)
+  const [nameValue, setNameValue] = useState(exercise.name)
+  const [savingName, setSavingName] = useState(false)
+  // Category editing
+  const [category, setCategory] = useState(exercise.category)
+  const [savingCategory, setSavingCategory] = useState(false)
   const supabase = createClient()
   const router = useRouter()
 
@@ -90,6 +100,30 @@ export default function ExerciseDetailClient({ exercise, exerciseId, sessions: i
   })
 
   const pr = progressData.length > 0 ? Math.max(...progressData.map(d => d.max_weight)) : null
+
+  // Best single set: highest weight × reps in one set
+  const prBestSet = sessions.length > 0
+    ? Math.max(...sessions.flatMap(s => s.sets.map(set => (set.weight_lbs ?? 0) * (set.reps ?? 0))))
+    : null
+
+  async function saveName() {
+    const trimmed = nameValue.trim()
+    if (!trimmed || trimmed === exercise.name) { setEditingName(false); return }
+    setSavingName(true)
+    const { error: e } = await supabase.from('exercises').update({ name: trimmed }).eq('id', exerciseId)
+    if (e) { setError(e.message); setSavingName(false); return }
+    setSavingName(false)
+    setEditingName(false)
+    router.refresh()
+  }
+
+  async function saveCategory(newCat: string) {
+    setSavingCategory(true)
+    const { error: e } = await supabase.from('exercises').update({ category: newCat }).eq('id', exerciseId)
+    if (e) { setError(e.message); setSavingCategory(false); return }
+    setCategory(newCat)
+    setSavingCategory(false)
+  }
 
   function toggleBulkMode() {
     setBulkMode(b => !b)
@@ -112,13 +146,11 @@ export default function ExerciseDetailClient({ exercise, exerciseId, sessions: i
 
   async function mergeInto(targetId: string) {
     setMerging(true)
-    // Move all sets from this exercise to the target exercise
     const { error: e } = await supabase
       .from('workout_sets')
       .update({ exercise_id: targetId })
       .eq('exercise_id', exerciseId)
     if (e) { setError(e.message); setMerging(false); return }
-    // Delete this exercise record
     await supabase.from('exercises').delete().eq('id', exerciseId)
     router.push(`/exercise/${targetId}`)
     router.refresh()
@@ -144,14 +176,13 @@ export default function ExerciseDetailClient({ exercise, exerciseId, sessions: i
     for (const sessionId of selected) {
       const session = sessions.find(s => s.sessionId === sessionId)
       if (!session) continue
-      const newDate = bulkYear + session.date.slice(4) // replace YYYY, keep -MM-DD
+      const newDate = bulkYear + session.date.slice(4)
       const { error: e } = await supabase
         .from('workout_sessions')
         .update({ date: newDate })
         .eq('id', sessionId)
       if (e) { setError(e.message); setBulkSaving(false); return }
     }
-    // Update local state
     setSessions(prev => prev.map(s =>
       selected.has(s.sessionId)
         ? { ...s, date: bulkYear + s.date.slice(4) }
@@ -206,7 +237,6 @@ export default function ExerciseDetailClient({ exercise, exerciseId, sessions: i
     setSaving(true)
     setError('')
 
-    // Update session date if changed
     const original = sessions.find(s => s.sessionId === sessionId)!
     if (editState.date !== original.date) {
       const { error: e } = await supabase
@@ -216,7 +246,6 @@ export default function ExerciseDetailClient({ exercise, exerciseId, sessions: i
       if (e) { setError(e.message); setSaving(false); return }
     }
 
-    // Delete sets that were removed
     const keptIds = new Set(editState.sets.map(s => s.id).filter(Boolean))
     const deletedIds = original.sets.map(s => s.id).filter(id => !keptIds.has(id))
     if (deletedIds.length > 0) {
@@ -224,7 +253,6 @@ export default function ExerciseDetailClient({ exercise, exerciseId, sessions: i
       if (e) { setError(e.message); setSaving(false); return }
     }
 
-    // Upsert each set
     for (let i = 0; i < editState.sets.length; i++) {
       const s = editState.sets[i]
       const payload = {
@@ -244,7 +272,6 @@ export default function ExerciseDetailClient({ exercise, exerciseId, sessions: i
       }
     }
 
-    // Re-fetch updated sets for this session
     const { data: freshSets } = await supabase
       .from('workout_sets')
       .select('id, set_number, weight_lbs, reps, notes')
@@ -265,11 +292,53 @@ export default function ExerciseDetailClient({ exercise, exerciseId, sessions: i
   return (
     <div className="max-w-3xl mx-auto space-y-6">
       <div>
-        <p className="text-xs uppercase mb-1" style={{ color: 'var(--muted)' }}>{exercise.category}</p>
-        <h1 className="text-2xl font-bold">{exercise.name}</h1>
+        {/* Category — click to change */}
+        <div className="flex items-center gap-2 mb-1">
+          <select
+            value={category}
+            onChange={e => saveCategory(e.target.value)}
+            disabled={savingCategory}
+            className="text-xs uppercase bg-transparent border-none outline-none cursor-pointer pr-1"
+            style={{ color: 'var(--muted)' }}>
+            {CATEGORIES.map(c => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Exercise name — click to edit */}
+        {editingName ? (
+          <div className="flex items-center gap-2">
+            <input
+              autoFocus
+              value={nameValue}
+              onChange={e => setNameValue(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') saveName(); if (e.key === 'Escape') { setEditingName(false); setNameValue(exercise.name) } }}
+              className="text-2xl font-bold bg-transparent border-b outline-none flex-1"
+              style={{ borderColor: 'var(--accent)', color: 'var(--foreground)' }}
+            />
+            <button onClick={saveName} disabled={savingName}
+              className="text-sm px-3 py-1 rounded-lg font-semibold text-white disabled:opacity-50"
+              style={{ background: 'var(--accent)' }}>
+              {savingName ? '…' : 'Save'}
+            </button>
+            <button onClick={() => { setEditingName(false); setNameValue(exercise.name) }}
+              className="text-sm px-3 py-1 rounded-lg border"
+              style={{ borderColor: 'var(--card-border)', color: 'var(--muted)' }}>
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button onClick={() => setEditingName(true)} className="text-left group">
+            <h1 className="text-2xl font-bold group-hover:opacity-80">{nameValue}</h1>
+            <span className="text-xs" style={{ color: 'var(--muted)' }}>tap to rename</span>
+          </button>
+        )}
+
         <p className="text-sm mt-1" style={{ color: 'var(--muted)' }}>
           {sessions.length} sessions
           {pr ? <span> · PR: <span style={{ color: 'var(--accent)' }}>{pr} lbs</span></span> : null}
+          {prBestSet ? <span> · Best set: <span style={{ color: 'var(--accent)' }}>{prBestSet.toLocaleString()} lbs×reps</span></span> : null}
         </p>
       </div>
 
@@ -308,23 +377,26 @@ export default function ExerciseDetailClient({ exercise, exerciseId, sessions: i
         </div>
       )}
 
-      {/* Bulk year toolbar */}
-      <div className="flex items-center justify-between gap-3">
+      {/* Toolbar */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <Link href={`/log?exercise=${exerciseId}`}
+          className="text-xs px-3 py-1.5 rounded-lg border font-medium transition-colors"
+          style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>
+          + Log
+        </Link>
         <button onClick={() => setShowMerge(true)}
           className="text-xs px-3 py-1.5 rounded-lg border transition-colors"
           style={{ borderColor: 'var(--card-border)', color: 'var(--muted)' }}>
           Merge into…
         </button>
         <button onClick={toggleBulkMode}
-          className="text-xs px-3 py-1.5 rounded-lg border transition-colors"
+          className="text-xs px-3 py-1.5 rounded-lg border transition-colors ml-auto"
           style={{ borderColor: 'var(--card-border)', color: bulkMode ? 'var(--accent)' : 'var(--muted)', background: bulkMode ? 'rgba(232,93,4,0.1)' : 'transparent' }}>
           {bulkMode ? 'Cancel bulk edit' : 'Bulk edit years'}
         </button>
         {bulkMode && (
-          <div className="flex items-center gap-2 flex-1">
-            <button onClick={selectAll} className="text-xs" style={{ color: 'var(--muted)' }}>
-              Select all
-            </button>
+          <div className="flex items-center gap-2 w-full">
+            <button onClick={selectAll} className="text-xs" style={{ color: 'var(--muted)' }}>Select all</button>
             <span className="text-xs" style={{ color: 'var(--muted)' }}>·</span>
             <span className="text-xs" style={{ color: 'var(--muted)' }}>{selected.size} selected</span>
             <input
@@ -355,7 +427,6 @@ export default function ExerciseDetailClient({ exercise, exerciseId, sessions: i
             return (
               <div key={s.sessionId} className="rounded-xl border p-4 space-y-3"
                 style={{ background: 'var(--card)', borderColor: 'var(--accent)' }}>
-                {/* Date */}
                 <div className="flex items-center gap-2">
                   <label className="text-xs font-medium w-10" style={{ color: 'var(--muted)' }}>Date</label>
                   <input
@@ -367,7 +438,6 @@ export default function ExerciseDetailClient({ exercise, exerciseId, sessions: i
                   />
                 </div>
 
-                {/* Sets */}
                 <div className="space-y-2">
                   <div className="grid text-xs font-medium pb-1" style={{ color: 'var(--muted)', gridTemplateColumns: '28px 1fr 1fr 1fr 28px' }}>
                     <span>#</span><span>Weight (lbs)</span><span>Reps</span><span>Notes</span><span />
@@ -484,7 +554,7 @@ export default function ExerciseDetailClient({ exercise, exerciseId, sessions: i
             style={{ background: 'var(--card)', borderColor: 'var(--card-border)' }}>
             <h3 className="text-base font-semibold">Merge into another exercise</h3>
             <p className="text-sm" style={{ color: 'var(--muted)' }}>
-              All sets from <strong>{exercise.name}</strong> will be moved to the exercise you choose, then this record will be deleted.
+              All sets from <strong>{nameValue}</strong> will be moved to the exercise you choose, then this record will be deleted.
             </p>
             <input
               type="text"
@@ -535,7 +605,7 @@ export default function ExerciseDetailClient({ exercise, exerciseId, sessions: i
             style={{ background: 'var(--card)', borderColor: 'var(--card-border)' }}>
             <h3 className="text-base font-semibold">Delete this session?</h3>
             <p className="text-sm" style={{ color: 'var(--muted)' }}>
-              This will permanently remove all sets for <strong>{exercise.name}</strong> on{' '}
+              This will permanently remove all sets for <strong>{nameValue}</strong> on{' '}
               <strong>{formatDate(sessions.find(s => s.sessionId === deleteConfirmId)?.date ?? '')}</strong>.
               This cannot be undone.
             </p>

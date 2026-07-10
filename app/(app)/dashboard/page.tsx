@@ -37,6 +37,7 @@ export default async function DashboardPage() {
   const allExerciseRows = allExerciseSets.map((row: any) => ({
     exerciseId: row.exercise_id,
     name: row.exercises?.name ?? 'Unknown',
+    category: (row.exercises?.category ?? 'other') as string,
     date: row.workout_sessions?.date ?? '',
     weight_lbs: row.weight_lbs ?? 0,
     reps: row.reps ?? 0,

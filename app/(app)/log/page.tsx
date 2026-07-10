@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase'
 
 interface Exercise { id: string; name: string; category: string }
@@ -11,6 +12,7 @@ const emptySet = (): SetEntry => ({ weight: '', reps: '', notes: '' })
 
 export default function LogPage() {
   const supabase = createClient()
+  const searchParams = useSearchParams()
   const [date, setDate] = useState(new Date().toISOString().split('T')[0])
   const [sessionNotes, setSessionNotes] = useState('')
   const [exercises, setExercises] = useState<Exercise[]>([])
@@ -20,10 +22,20 @@ export default function LogPage() {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
+  const [newSession, setNewSession] = useState(false)
 
   useEffect(() => {
     supabase.from('exercises').select('id, name, category').order('name')
-      .then(({ data }) => setExercises(data ?? []))
+      .then(({ data }) => {
+        const list = data ?? []
+        setExercises(list)
+        // Pre-populate from ?exercise= query param
+        const preId = searchParams.get('exercise')
+        if (preId) {
+          const ex = list.find((e: Exercise) => e.id === preId)
+          if (ex) setEntries([{ exerciseId: ex.id, exerciseName: ex.name, sets: [emptySet()] }])
+        }
+      })
   }, [])
 
   const filteredExercises = exercises.filter(e =>
@@ -74,20 +86,46 @@ export default function LogPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { setError('Not logged in'); setSaving(false); return }
 
-    const { data: session, error: sessionErr } = await supabase
-      .from('workout_sessions')
-      .insert({ user_id: user.id, date, notes: sessionNotes || null })
-      .select().single()
+    let sessionId: string
 
-    if (sessionErr || !session) {
-      setError(sessionErr?.message ?? 'Failed to save session')
-      setSaving(false)
-      return
+    if (!newSession) {
+      // Try to find an existing session for this date
+      const { data: existing } = await supabase
+        .from('workout_sessions')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('date', date)
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .single()
+
+      if (existing) {
+        sessionId = existing.id
+        // Append session notes if provided
+        if (sessionNotes) {
+          await supabase.from('workout_sessions').update({ notes: sessionNotes }).eq('id', sessionId)
+        }
+      } else {
+        const { data: session, error: sessionErr } = await supabase
+          .from('workout_sessions')
+          .insert({ user_id: user.id, date, notes: sessionNotes || null })
+          .select().single()
+        if (sessionErr || !session) { setError(sessionErr?.message ?? 'Failed to save session'); setSaving(false); return }
+        sessionId = session.id
+      }
+    } else {
+      const { data: session, error: sessionErr } = await supabase
+        .from('workout_sessions')
+        .insert({ user_id: user.id, date, notes: sessionNotes || null })
+        .select().single()
+      if (sessionErr || !session) { setError(sessionErr?.message ?? 'Failed to save session'); setSaving(false); return }
+      sessionId = session.id
     }
 
+    // Find the max set_number already in this session for each exercise, then append
     const setsToInsert = entries.flatMap(entry =>
       entry.sets.map((s, i) => ({
-        session_id: session.id,
+        session_id: sessionId,
         exercise_id: entry.exerciseId,
         set_number: i + 1,
         weight_lbs: s.weight ? parseFloat(s.weight) : null,
@@ -130,6 +168,17 @@ export default function LogPage() {
             className="w-full px-3 py-1.5 rounded-lg border text-sm outline-none"
             style={{ background: 'var(--background)', borderColor: 'var(--card-border)', color: 'var(--foreground)' }} />
         </div>
+        <label className="flex items-center gap-2 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={newSession}
+            onChange={e => setNewSession(e.target.checked)}
+            className="w-4 h-4 accent-orange-500"
+          />
+          <span className="text-xs" style={{ color: 'var(--muted)' }}>
+            New separate session (creates a second workout entry for this date)
+          </span>
+        </label>
       </div>
 
       {/* Exercise entries */}

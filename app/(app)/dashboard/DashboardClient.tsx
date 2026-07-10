@@ -4,11 +4,12 @@ import { useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
-  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
+  LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
 } from 'recharts'
+import { createClient } from '@/lib/supabase'
 
 interface Props {
-  allExerciseRows: { exerciseId: string; name: string; date: string; weight_lbs: number; reps: number }[]
+  allExerciseRows: { exerciseId: string; name: string; category: string; date: string; weight_lbs: number; reps: number }[]
   recentSessions: { id: string; date: string; notes: string | null }[]
   bodyWeights: { date: string; weight_lbs: number }[]
 }
@@ -43,12 +44,33 @@ function formatDate(d: string) {
   return new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
-export default function DashboardClient({ allExerciseRows, recentSessions, bodyWeights }: Props) {
+// Return ISO week label like "Jun 30"
+function weekLabel(date: Date) {
+  // Monday of the week
+  const d = new Date(date)
+  const day = d.getDay()
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1)
+  d.setDate(diff)
+  return d.toISOString().split('T')[0]
+}
+
+const UPPER_CATS = new Set(['upper'])
+const LOWER_CATS = new Set(['lower', 'legs'])
+
+export default function DashboardClient({ allExerciseRows, recentSessions, bodyWeights: initialBodyWeights }: Props) {
   const router = useRouter()
+  const supabase = createClient()
   const [sessionSearch, setSessionSearch] = useState('')
   const [exerciseDays, setExerciseDays] = useState(0)
   const [selectedExerciseId, setSelectedExerciseId] = useState<string | null>(null)
   const [chartMetric, setChartMetric] = useState<'max_weight' | 'avg_weight' | 'avg_reps' | 'volume'>('max_weight')
+  // Body weight log
+  const [bodyWeights, setBodyWeights] = useState(initialBodyWeights)
+  const [showWeightForm, setShowWeightForm] = useState(false)
+  const [weightDate, setWeightDate] = useState(new Date().toISOString().split('T')[0])
+  const [weightLbs, setWeightLbs] = useState('')
+  const [savingWeight, setSavingWeight] = useState(false)
+  const [weightError, setWeightError] = useState('')
 
   const priorityExercises = useMemo(() => {
     const cutoff = exerciseDays > 0
@@ -65,7 +87,6 @@ export default function DashboardClient({ allExerciseRows, recentSessions, bodyW
       .map(([id, { name, count }]) => ({ id, name, count }))
   }, [allExerciseRows, exerciseDays])
 
-  // Default chart to top exercise if nothing selected
   const chartExerciseId = selectedExerciseId ?? priorityExercises[0]?.id ?? null
   const chartExerciseName = allExerciseRows.find(r => r.exerciseId === chartExerciseId)?.name ?? ''
 
@@ -98,6 +119,38 @@ export default function DashboardClient({ allExerciseRows, recentSessions, bodyW
       })
   }, [allExerciseRows, chartExerciseId, exerciseDays])
 
+  // Workout frequency: sessions per week (last 26 weeks)
+  const frequencyData = useMemo(() => {
+    const cutoff = new Date(Date.now() - 26 * 7 * 86400000).toISOString().split('T')[0]
+    const weekCounts: Record<string, number> = {}
+    for (const s of recentSessions) {
+      if (s.date < cutoff) continue
+      const wk = weekLabel(new Date(s.date + 'T00:00:00'))
+      weekCounts[wk] = (weekCounts[wk] ?? 0) + 1
+    }
+    return Object.entries(weekCounts)
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([week, count]) => ({ week, count }))
+  }, [recentSessions])
+
+  // Upper / Lower volume per week (last 26 weeks)
+  const splitData = useMemo(() => {
+    const cutoff = new Date(Date.now() - 26 * 7 * 86400000).toISOString().split('T')[0]
+    const weekMap: Record<string, { upper: number; lower: number }> = {}
+    for (const row of allExerciseRows) {
+      if (row.date < cutoff) continue
+      const wk = weekLabel(new Date(row.date + 'T00:00:00'))
+      if (!weekMap[wk]) weekMap[wk] = { upper: 0, lower: 0 }
+      if (UPPER_CATS.has(row.category)) weekMap[wk].upper += row.weight_lbs * row.reps
+      if (LOWER_CATS.has(row.category)) weekMap[wk].lower += row.weight_lbs * row.reps
+    }
+    return Object.entries(weekMap)
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([week, { upper, lower }]) => ({ week, upper, lower }))
+  }, [allExerciseRows])
+
+  const hasAnySplitData = splitData.some(d => d.upper > 0 || d.lower > 0)
+
   const filteredSessions = sessionSearch.trim()
     ? recentSessions.filter(s =>
         s.date.includes(sessionSearch.trim()) ||
@@ -105,6 +158,27 @@ export default function DashboardClient({ allExerciseRows, recentSessions, bodyW
         (s.notes ?? '').toLowerCase().includes(sessionSearch.toLowerCase())
       )
     : recentSessions
+
+  async function saveWeight() {
+    if (!weightLbs) return
+    setSavingWeight(true)
+    setWeightError('')
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { setWeightError('Not logged in'); setSavingWeight(false); return }
+    const { error: e } = await supabase.from('body_weight').upsert(
+      { user_id: user.id, date: weightDate, weight_lbs: parseFloat(weightLbs) },
+      { onConflict: 'user_id,date' }
+    )
+    if (e) { setWeightError(e.message); setSavingWeight(false); return }
+    // Update local state
+    setBodyWeights(prev => {
+      const next = prev.filter(bw => bw.date !== weightDate)
+      return [...next, { date: weightDate, weight_lbs: parseFloat(weightLbs) }].sort((a, b) => a.date.localeCompare(b.date))
+    })
+    setWeightLbs('')
+    setShowWeightForm(false)
+    setSavingWeight(false)
+  }
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
@@ -116,9 +190,49 @@ export default function DashboardClient({ allExerciseRows, recentSessions, bodyW
         </Link>
       </div>
 
-      {bodyWeights.length > 0 && (
-        <Card>
-          <SectionTitle>Body Weight (last 6 months)</SectionTitle>
+      {/* Body weight chart + log button */}
+      <Card>
+        <div className="flex items-center justify-between mb-4">
+          <SectionTitle>Body Weight</SectionTitle>
+          <button
+            onClick={() => setShowWeightForm(v => !v)}
+            className="text-xs px-3 py-1.5 rounded-lg border font-medium"
+            style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>
+            {showWeightForm ? 'Cancel' : '+ Log Weight'}
+          </button>
+        </div>
+
+        {showWeightForm && (
+          <div className="flex items-center gap-2 mb-4 flex-wrap">
+            <input
+              type="date"
+              value={weightDate}
+              onChange={e => setWeightDate(e.target.value)}
+              className="px-3 py-1.5 rounded-lg border text-sm outline-none"
+              style={{ background: 'var(--background)', borderColor: 'var(--card-border)', color: 'var(--foreground)' }}
+            />
+            <input
+              type="number"
+              step="0.1"
+              placeholder="lbs"
+              value={weightLbs}
+              onChange={e => setWeightLbs(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && saveWeight()}
+              className="w-24 px-3 py-1.5 rounded-lg border text-sm outline-none"
+              style={{ background: 'var(--background)', borderColor: 'var(--card-border)', color: 'var(--foreground)' }}
+            />
+            <button
+              onClick={saveWeight}
+              disabled={savingWeight || !weightLbs}
+              className="px-4 py-1.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50"
+              style={{ background: 'var(--accent)' }}>
+              {savingWeight ? 'Saving…' : 'Save'}
+            </button>
+            {weightError && <p className="text-red-400 text-xs w-full">{weightError}</p>}
+          </div>
+        )}
+
+        {bodyWeights.length > 0 ? (
           <ResponsiveContainer width="100%" height={180}>
             <LineChart data={bodyWeights}>
               <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" />
@@ -128,10 +242,12 @@ export default function DashboardClient({ allExerciseRows, recentSessions, bodyW
               <Line type="monotone" dataKey="weight_lbs" stroke="#f48c06" strokeWidth={2} dot={false} />
             </LineChart>
           </ResponsiveContainer>
-        </Card>
-      )}
+        ) : (
+          <p className="text-sm" style={{ color: 'var(--muted)' }}>No weight entries yet. Log your first one above.</p>
+        )}
+      </Card>
 
-      {/* Exercise chart — updates when top exercise is tapped, tap chart to go to detail */}
+      {/* Exercise chart */}
       {chartData.length > 0 && (
         <Card>
           <div className="flex items-center justify-between mb-3">
@@ -181,7 +297,7 @@ export default function DashboardClient({ allExerciseRows, recentSessions, bodyW
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Top exercises — tap to update chart */}
+        {/* Top exercises */}
         <Card>
           <div className="flex items-center gap-2 mb-4">
             <h2 className="text-base font-semibold flex-1" style={{ color: 'var(--muted)' }}>Top Exercises</h2>
@@ -261,6 +377,49 @@ export default function DashboardClient({ allExerciseRows, recentSessions, bodyW
           )}
         </Card>
       </div>
+
+      {/* Workout frequency per week */}
+      {frequencyData.length > 0 && (
+        <Card>
+          <SectionTitle>Workout Frequency (last 6 months)</SectionTitle>
+          <ResponsiveContainer width="100%" height={180}>
+            <BarChart data={frequencyData} barSize={16}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" vertical={false} />
+              <XAxis dataKey="week" tickFormatter={d => formatDate(d)} tick={{ fill: '#888', fontSize: 10 }} />
+              <YAxis allowDecimals={false} tick={{ fill: '#888', fontSize: 11 }} />
+              <Tooltip {...CHART_TOOLTIP_STYLE}
+                labelFormatter={d => `Week of ${formatDate(d as string)}`}
+                formatter={(v: any) => [v, 'Sessions']} />
+              <Bar dataKey="count" fill="#e85d04" radius={[3, 3, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </Card>
+      )}
+
+      {/* Upper / Lower split */}
+      {hasAnySplitData && (
+        <Card>
+          <div className="flex items-center justify-between mb-1">
+            <SectionTitle>Upper vs Lower Volume (last 6 months)</SectionTitle>
+          </div>
+          <p className="text-xs mb-4" style={{ color: 'var(--muted)' }}>
+            Tag exercises as "upper" or "lower" on their detail page to populate this chart.
+          </p>
+          <ResponsiveContainer width="100%" height={180}>
+            <BarChart data={splitData} barSize={10}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" vertical={false} />
+              <XAxis dataKey="week" tickFormatter={d => formatDate(d)} tick={{ fill: '#888', fontSize: 10 }} />
+              <YAxis tick={{ fill: '#888', fontSize: 11 }} />
+              <Tooltip {...CHART_TOOLTIP_STYLE}
+                labelFormatter={d => `Week of ${formatDate(d as string)}`}
+                formatter={(v: any, name: any) => [Number(v).toLocaleString(), name === 'upper' ? 'Upper vol.' : 'Lower vol.']} />
+              <Legend wrapperStyle={{ fontSize: 11, color: '#888' }} />
+              <Bar dataKey="upper" name="Upper" fill="#e85d04" radius={[3, 3, 0, 0]} />
+              <Bar dataKey="lower" name="Lower" fill="#f48c06" radius={[3, 3, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </Card>
+      )}
     </div>
   )
 }

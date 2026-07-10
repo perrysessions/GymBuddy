@@ -8,12 +8,12 @@ The import pipeline supports two formats: (1) Apple Notes text with em-dash `–
 Data is fully imported. Common issues: (1) wrong years from import — use Bulk Edit Years on exercise detail page; (2) duplicate exercise names from import — use Merge into… button on exercise detail page to consolidate all sets into one record.
 
 ## Stack & Key Files
-- `app/(app)/dashboard/` — Dashboard: exercise line chart with 4-metric toggle (Max Weight / Avg Weight / Avg Reps / Volume), body weight chart, Top Exercises (all exercises scrollable, 30d/90d/6mo/1yr/All range toggle, tap to update chart), Workouts list (all sessions scrollable + searchable). Uses `force-dynamic` + `noStore()` + paginated Supabase queries (`.range()` loop, 1000 rows/page) — never use `.limit()` alone for large datasets.
+- `app/(app)/dashboard/` — Dashboard: Body Weight card (always visible, + Log Weight inline form, upserts by user_id+date), exercise line chart with 4-metric toggle, Top Exercises (30d/90d/6mo/1yr/All, tap to update chart), Workouts list (searchable), Workout Frequency bar chart (sessions/week last 26 weeks), Upper vs Lower Volume bar chart (hidden until exercises are tagged upper/lower). `allExerciseRows` includes `category` field. Uses `force-dynamic` + `noStore()` + paginated Supabase queries (`.range()` loop, 1000 rows/page) — never use `.limit()` alone for large datasets.
 - `app/(app)/session/[id]/` — Session detail: date, PR compliments, per-exercise bar charts + set tables.
-- `app/(app)/exercise/[id]/` — Exercise detail: 4-metric chart toggle, full session history. Per session row: Edit (inline date/sets/weight/reps), Delete (confirmation dialog, removes sets for this exercise in that session), Bulk Edit Years (checkboxes + year input), Merge into… (search + select target exercise → moves all sets + deletes this exercise record → redirects to target).
-- `app/(app)/log/` — Log a workout manually.
+- `app/(app)/exercise/[id]/` — Exercise detail: category dropdown (upper/lower/core/cardio/other, saves on change), inline name rename (click name → input), 4-metric chart toggle, PR weight + Best Set (max weight×reps in a single set) in header, + Log button (links to /log?exercise=id), Merge into…, Bulk Edit Years, per-session Edit/Delete.
+- `app/(app)/log/` — Log a workout manually. Default: merges sets into an existing session for the same date (upsert by date). "New separate session" checkbox creates a fresh session row. Accepts `?exercise=<id>` query param to pre-populate an exercise.
 - `app/(app)/import/` — Paste notes → Prepare (auto-chunks, detects format) → Review chunks → Parse with AI → Preview → Save.
-- `app/(app)/chat/` — Persistent AI chat. Desktop: left sidebar with all sessions. Mobile: "☰ Chats" button opens bottom sheet. New Chat button, search, delete. Session title = first message. Messages persisted in `chat_sessions` + `chat_messages` Supabase tables. Daily usage bar (50-chat limit in localStorage). Only visible if `user_profiles.is_ai_enabled = true`.
+- `app/(app)/chat/` — Persistent AI chat. Desktop: left sidebar with all sessions. Mobile: "☰ Chats" button opens bottom sheet. New Chat button, search, delete. Session title = first message. Messages persisted in `chat_sessions` + `chat_messages` Supabase tables. Daily usage bar (50-chat limit in localStorage). Only visible if `user_profiles.is_ai_enabled = true`. NOTE: chat_sessions insert must include `user_id` — RLS rejects rows without it (was a bug, now fixed).
 - `app/api/chat/route.ts` — Gemini chat (`gemini-2.5-flash`), checks is_ai_enabled server-side, injects 90-day workout context, try/catch returns JSON errors.
 - `app/api/parse-notes/route.ts` — Single Gemini call, compact JSON prompt, remaps short keys, retries on 503.
 - `app/login/page.tsx` — Log In / Sign Up / Forgot Password (Supabase reset email → `/reset-password`).
@@ -49,4 +49,3 @@ To do: add gym-buddy-livid.vercel.app to Supabase → Authentication → URL Con
 ## What's Left
 1. Add Vercel URL to Supabase redirect URLs (for forgot-password links)
 2. Fix exercise names with embedded YouTube URLs (import artifact)
-3. Body weight manual entry page (can view chart but can't add entries without importing)

@@ -100,9 +100,10 @@ export default function ChatPage() {
     let sessionId = currentSessionId
     if (!sessionId) {
       const title = content.length > 60 ? content.slice(0, 57) + '…' : content
+      const { data: { user: currentUser } } = await supabase.auth.getUser()
       const { data: newSession } = await supabase
         .from('chat_sessions')
-        .insert({ title })
+        .insert({ title, user_id: currentUser?.id })
         .select('id')
         .single()
       if (!newSession) { setError('Failed to create chat session'); setLoading(false); return }
