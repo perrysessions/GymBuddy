@@ -4,7 +4,7 @@ import { useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
-  LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
+  ComposedChart, LineChart, Line, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
 } from 'recharts'
 import { createClient } from '@/lib/supabase'
 
@@ -119,19 +119,31 @@ export default function DashboardClient({ allExerciseRows, recentSessions, bodyW
       })
   }, [allExerciseRows, chartExerciseId, exerciseDays])
 
-  // Workout frequency: sessions per week (last 26 weeks)
-  const frequencyData = useMemo(() => {
+  // Combined weekly chart: sessions/week + avg body weight/week (last 26 weeks)
+  const combinedWeeklyData = useMemo(() => {
     const cutoff = new Date(Date.now() - 26 * 7 * 86400000).toISOString().split('T')[0]
-    const weekCounts: Record<string, number> = {}
+    const weekSessions: Record<string, number> = {}
+    const weekWeights: Record<string, number[]> = {}
     for (const s of recentSessions) {
       if (s.date < cutoff) continue
       const wk = weekLabel(new Date(s.date + 'T00:00:00'))
-      weekCounts[wk] = (weekCounts[wk] ?? 0) + 1
+      weekSessions[wk] = (weekSessions[wk] ?? 0) + 1
     }
-    return Object.entries(weekCounts)
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([week, count]) => ({ week, count }))
-  }, [recentSessions])
+    for (const bw of bodyWeights) {
+      if (bw.date < cutoff) continue
+      const wk = weekLabel(new Date(bw.date + 'T00:00:00'))
+      if (!weekWeights[wk]) weekWeights[wk] = []
+      weekWeights[wk].push(bw.weight_lbs)
+    }
+    const allWeeks = new Set([...Object.keys(weekSessions), ...Object.keys(weekWeights)])
+    return Array.from(allWeeks).sort().map(week => ({
+      week,
+      sessions: weekSessions[week] ?? 0,
+      weight: weekWeights[week]
+        ? Math.round((weekWeights[week].reduce((a, b) => a + b, 0) / weekWeights[week].length) * 10) / 10
+        : null,
+    }))
+  }, [recentSessions, bodyWeights])
 
   // Upper / Lower volume per week (last 26 weeks)
   const splitData = useMemo(() => {
@@ -320,24 +332,6 @@ export default function DashboardClient({ allExerciseRows, recentSessions, bodyW
         </Card>
       </div>
 
-      {/* Workout frequency per week */}
-      {frequencyData.length > 0 && (
-        <Card>
-          <SectionTitle>Workout Frequency (last 6 months)</SectionTitle>
-          <ResponsiveContainer width="100%" height={180}>
-            <BarChart data={frequencyData} barSize={16}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" vertical={false} />
-              <XAxis dataKey="week" tickFormatter={d => formatDate(d)} tick={{ fill: '#888', fontSize: 10 }} />
-              <YAxis allowDecimals={false} tick={{ fill: '#888', fontSize: 11 }} />
-              <Tooltip {...CHART_TOOLTIP_STYLE}
-                labelFormatter={d => `Week of ${formatDate(d as string)}`}
-                formatter={(v: any) => [v, 'Sessions']} />
-              <Bar dataKey="count" fill="#e85d04" radius={[3, 3, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </Card>
-      )}
-
       {/* Upper / Lower split */}
       {hasAnySplitData && (
         <Card>
@@ -348,7 +342,7 @@ export default function DashboardClient({ allExerciseRows, recentSessions, bodyW
             Tag exercises as "upper" or "lower" on their detail page to populate this chart.
           </p>
           <ResponsiveContainer width="100%" height={180}>
-            <BarChart data={splitData} barSize={10}>
+            <ComposedChart data={splitData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" vertical={false} />
               <XAxis dataKey="week" tickFormatter={d => formatDate(d)} tick={{ fill: '#888', fontSize: 10 }} />
               <YAxis tick={{ fill: '#888', fontSize: 11 }} />
@@ -356,69 +350,71 @@ export default function DashboardClient({ allExerciseRows, recentSessions, bodyW
                 labelFormatter={d => `Week of ${formatDate(d as string)}`}
                 formatter={(v: any, name: any) => [Number(v).toLocaleString(), name === 'upper' ? 'Upper vol.' : 'Lower vol.']} />
               <Legend wrapperStyle={{ fontSize: 11, color: '#888' }} />
-              <Bar dataKey="upper" name="Upper" fill="#e85d04" radius={[3, 3, 0, 0]} />
-              <Bar dataKey="lower" name="Lower" fill="#f48c06" radius={[3, 3, 0, 0]} />
-            </BarChart>
+              <Bar dataKey="upper" name="Upper" fill="#e85d04" radius={[3, 3, 0, 0]} barSize={10} />
+              <Bar dataKey="lower" name="Lower" fill="#f48c06" radius={[3, 3, 0, 0]} barSize={10} />
+            </ComposedChart>
           </ResponsiveContainer>
         </Card>
       )}
 
-      {/* Body weight chart + log button */}
-      <Card>
-        <div className="flex items-center justify-between mb-4">
-          <SectionTitle>Body Weight</SectionTitle>
-          <button
-            onClick={() => setShowWeightForm(v => !v)}
-            className="text-xs px-3 py-1.5 rounded-lg border font-medium"
-            style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>
-            {showWeightForm ? 'Cancel' : '+ Log Weight'}
-          </button>
-        </div>
-
-        {showWeightForm && (
-          <div className="flex items-center gap-2 mb-4 flex-wrap">
-            <input
-              type="date"
-              value={weightDate}
-              onChange={e => setWeightDate(e.target.value)}
-              className="px-3 py-1.5 rounded-lg border text-sm outline-none"
-              style={{ background: 'var(--background)', borderColor: 'var(--card-border)', color: 'var(--foreground)' }}
-            />
-            <input
-              type="number"
-              step="0.1"
-              placeholder="lbs"
-              value={weightLbs}
-              onChange={e => setWeightLbs(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && saveWeight()}
-              className="w-24 px-3 py-1.5 rounded-lg border text-sm outline-none"
-              style={{ background: 'var(--background)', borderColor: 'var(--card-border)', color: 'var(--foreground)' }}
-            />
+      {/* Combined body weight + workout frequency */}
+      {combinedWeeklyData.length > 0 && (
+        <Card>
+          <div className="flex items-center justify-between mb-1">
+            <SectionTitle>Body Weight &amp; Workout Frequency</SectionTitle>
             <button
-              onClick={saveWeight}
-              disabled={savingWeight || !weightLbs}
-              className="px-4 py-1.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50"
-              style={{ background: 'var(--accent)' }}>
-              {savingWeight ? 'Saving…' : 'Save'}
+              onClick={() => setShowWeightForm(v => !v)}
+              className="text-xs px-3 py-1.5 rounded-lg border font-medium mb-3"
+              style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>
+              {showWeightForm ? 'Cancel' : '+ Log Weight'}
             </button>
-            {weightError && <p className="text-red-400 text-xs w-full">{weightError}</p>}
           </div>
-        )}
 
-        {bodyWeights.length > 0 ? (
-          <ResponsiveContainer width="100%" height={180}>
-            <LineChart data={bodyWeights}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" />
-              <XAxis dataKey="date" tickFormatter={formatDate} tick={{ fill: '#888', fontSize: 11 }} />
-              <YAxis domain={['auto', 'auto']} tick={{ fill: '#888', fontSize: 11 }} unit=" lbs" />
-              <Tooltip {...CHART_TOOLTIP_STYLE} formatter={(v: any) => [`${v} lbs`, 'Weight']} labelFormatter={(d: any) => formatDate(d)} />
-              <Line type="monotone" dataKey="weight_lbs" stroke="#f48c06" strokeWidth={2} dot={false} />
-            </LineChart>
+          {showWeightForm && (
+            <div className="flex items-center gap-2 mb-4 flex-wrap">
+              <input type="date" value={weightDate} onChange={e => setWeightDate(e.target.value)}
+                className="px-3 py-1.5 rounded-lg border text-sm outline-none"
+                style={{ background: 'var(--background)', borderColor: 'var(--card-border)', color: 'var(--foreground)' }} />
+              <input type="number" step="0.1" placeholder="lbs" value={weightLbs}
+                onChange={e => setWeightLbs(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && saveWeight()}
+                className="w-24 px-3 py-1.5 rounded-lg border text-sm outline-none"
+                style={{ background: 'var(--background)', borderColor: 'var(--card-border)', color: 'var(--foreground)' }} />
+              <button onClick={saveWeight} disabled={savingWeight || !weightLbs}
+                className="px-4 py-1.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50"
+                style={{ background: 'var(--accent)' }}>
+                {savingWeight ? 'Saving…' : 'Save'}
+              </button>
+              {weightError && <p className="text-red-400 text-xs w-full">{weightError}</p>}
+            </div>
+          )}
+
+          <div className="flex gap-4 text-xs mb-3" style={{ color: 'var(--muted)' }}>
+            <span><span style={{ color: '#f48c06' }}>●</span> Body weight (lbs, left)</span>
+            <span><span style={{ color: '#e85d04' }}>▌</span> Sessions/week (right)</span>
+          </div>
+
+          <ResponsiveContainer width="100%" height={200}>
+            <ComposedChart data={combinedWeeklyData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" vertical={false} />
+              <XAxis dataKey="week" tickFormatter={d => formatDate(d)} tick={{ fill: '#888', fontSize: 10 }} />
+              <YAxis yAxisId="weight" domain={['auto', 'auto']} tick={{ fill: '#888', fontSize: 11 }} unit=" lbs" width={52} />
+              <YAxis yAxisId="sessions" orientation="right" allowDecimals={false} tick={{ fill: '#888', fontSize: 11 }} width={28} />
+              <Tooltip
+                {...CHART_TOOLTIP_STYLE}
+                labelFormatter={d => `Week of ${formatDate(d as string)}`}
+                formatter={(v: any, name: any) => name === 'weight' ? [`${v} lbs`, 'Body weight'] : [v, 'Sessions']}
+              />
+              <Bar yAxisId="sessions" dataKey="sessions" fill="#e85d04" opacity={0.5} barSize={14} radius={[3, 3, 0, 0]} />
+              <Line yAxisId="weight" type="monotone" dataKey="weight" stroke="#f48c06" strokeWidth={2} dot={false} connectNulls />
+            </ComposedChart>
           </ResponsiveContainer>
-        ) : (
-          <p className="text-sm" style={{ color: 'var(--muted)' }}>No weight entries yet. Log your first one above.</p>
-        )}
-      </Card>
+
+          {bodyWeights.length === 0 && (
+            <p className="text-xs mt-2" style={{ color: 'var(--muted)' }}>No weight entries yet — log your first one above.</p>
+          )}
+        </Card>
+      )}
     </div>
   )
 }

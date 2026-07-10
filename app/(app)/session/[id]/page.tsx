@@ -19,10 +19,10 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
 
   if (!session) notFound()
 
-  // Fetch all sets for this session with exercise info
+  // Fetch all sets for this session with exercise info (include id for editing)
   const { data: sets } = await supabase
     .from('workout_sets')
-    .select('set_number, weight_lbs, reps, notes, exercise_id, exercises(id, name, category)')
+    .select('id, set_number, weight_lbs, reps, notes, exercise_id, exercises(id, name, category)')
     .eq('session_id', id)
     .order('set_number', { ascending: true })
 
@@ -30,7 +30,7 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
   const byExercise: Record<string, {
     exerciseId: string
     name: string
-    sets: { set_number: number; weight_lbs: number | null; reps: number | null; notes: string | null }[]
+    sets: { id: string; set_number: number; weight_lbs: number | null; reps: number | null; notes: string | null }[]
   }> = {}
 
   sets?.forEach((s: any) => {
@@ -39,6 +39,7 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
       byExercise[exId] = { exerciseId: exId, name: s.exercises?.name ?? 'Unknown', sets: [] }
     }
     byExercise[exId].sets.push({
+      id: s.id,
       set_number: s.set_number,
       weight_lbs: s.weight_lbs,
       reps: s.reps,
