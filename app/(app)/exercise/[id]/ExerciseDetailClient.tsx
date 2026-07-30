@@ -76,6 +76,73 @@ export default function ExerciseDetailClient({ exercise, exerciseId, sessions: i
   const [mergeSearch, setMergeSearch] = useState('')
   const [mergeTargetId, setMergeTargetId] = useState<string | null>(null)
   const [merging, setMerging] = useState(false)
+  // Inline log form
+  const [showLogForm, setShowLogForm] = useState(false)
+  const [logDate, setLogDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [logSets, setLogSets] = useState([{ weight_lbs: '', reps: '', notes: '' }])
+  const [logSaving, setLogSaving] = useState(false)
+  const [logError, setLogError] = useState('')
+
+  function openLogForm() {
+    setLogDate(new Date().toISOString().slice(0, 10))
+    setLogSets([{ weight_lbs: '', reps: '', notes: '' }])
+    setLogError('')
+    setShowLogForm(true)
+  }
+
+  async function saveLog(e: React.FormEvent) {
+    e.preventDefault()
+    setLogSaving(true)
+    setLogError('')
+    // Upsert session for this date
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { setLogError('Not logged in'); setLogSaving(false); return }
+    let sessionId: string
+    const { data: existing } = await supabase
+      .from('workout_sessions')
+      .select('id')
+      .eq('user_id', user.id)
+      .eq('date', logDate)
+      .limit(1)
+      .single()
+    if (existing) {
+      sessionId = existing.id
+    } else {
+      const { data: created, error: ce } = await supabase
+        .from('workout_sessions')
+        .insert({ user_id: user.id, date: logDate })
+        .select('id')
+        .single()
+      if (ce || !created) { setLogError(ce?.message ?? 'Failed to create session'); setLogSaving(false); return }
+      sessionId = created.id
+    }
+    // Get current max set_number for this exercise in this session
+    const { data: existingSets } = await supabase
+      .from('workout_sets')
+      .select('set_number')
+      .eq('session_id', sessionId)
+      .eq('exercise_id', exerciseId)
+      .order('set_number', { ascending: false })
+      .limit(1)
+    const startNum = (existingSets?.[0]?.set_number ?? 0) + 1
+    const rows = logSets
+      .filter(s => s.weight_lbs || s.reps)
+      .map((s, i) => ({
+        session_id: sessionId,
+        exercise_id: exerciseId,
+        set_number: startNum + i,
+        weight_lbs: s.weight_lbs ? parseFloat(s.weight_lbs) : null,
+        reps: s.reps ? parseFloat(s.reps) : null,
+        notes: s.notes || null,
+      }))
+    if (rows.length === 0) { setLogError('Add at least one set'); setLogSaving(false); return }
+    const { error: ie } = await supabase.from('workout_sets').insert(rows)
+    if (ie) { setLogError(ie.message); setLogSaving(false); return }
+    setShowLogForm(false)
+    setLogSaving(false)
+    router.refresh()
+  }
+
   // Name editing
   const [editingName, setEditingName] = useState(false)
   const [nameValue, setNameValue] = useState(exercise.name)
@@ -379,11 +446,11 @@ export default function ExerciseDetailClient({ exercise, exerciseId, sessions: i
 
       {/* Toolbar */}
       <div className="flex items-center gap-2 flex-wrap">
-        <Link href={`/log?exercise=${exerciseId}`}
+        <button onClick={() => showLogForm ? setShowLogForm(false) : openLogForm()}
           className="text-xs px-3 py-1.5 rounded-lg border font-medium transition-colors"
-          style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>
-          + Log
-        </Link>
+          style={{ borderColor: 'var(--accent)', color: showLogForm ? 'var(--muted)' : 'var(--accent)', background: showLogForm ? 'transparent' : undefined }}>
+          {showLogForm ? 'Cancel' : '+ Log'}
+        </button>
         <button onClick={() => setShowMerge(true)}
           className="text-xs px-3 py-1.5 rounded-lg border transition-colors"
           style={{ borderColor: 'var(--card-border)', color: 'var(--muted)' }}>
@@ -418,6 +485,54 @@ export default function ExerciseDetailClient({ exercise, exerciseId, sessions: i
         )}
       </div>
       {error && <p className="text-red-400 text-xs">{error}</p>}
+
+      {/* Inline log form */}
+      <div style={{
+        display: 'grid',
+        gridTemplateRows: showLogForm ? '1fr' : '0fr',
+        transition: 'grid-template-rows 0.25s ease',
+      }}>
+        <div style={{ overflow: 'hidden' }}>
+          <form onSubmit={saveLog} className="rounded-xl border p-4 space-y-3 mb-1"
+            style={{ background: 'var(--card)', borderColor: 'var(--accent)' }}>
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-semibold">Log {nameValue}</p>
+              <input type="date" value={logDate} onChange={e => setLogDate(e.target.value)}
+                className="text-xs px-2 py-1 rounded-lg border outline-none"
+                style={{ background: 'var(--background)', borderColor: 'var(--card-border)', color: 'var(--foreground)' }} />
+            </div>
+            <div className="grid text-xs font-medium" style={{ color: 'var(--muted)', gridTemplateColumns: '24px 1fr 1fr 28px' }}>
+              <span>#</span><span>Weight (lbs)</span><span>Reps</span><span />
+            </div>
+            {logSets.map((s, i) => (
+              <div key={i} className="grid items-center gap-1.5" style={{ gridTemplateColumns: '24px 1fr 1fr 28px' }}>
+                <span className="text-xs" style={{ color: 'var(--muted)' }}>{i + 1}</span>
+                <input type="number" step="0.5" placeholder="lbs" value={s.weight_lbs}
+                  onChange={e => setLogSets(prev => prev.map((r, j) => j === i ? { ...r, weight_lbs: e.target.value } : r))}
+                  className="px-2 py-1.5 rounded-lg border text-sm outline-none"
+                  style={{ background: 'var(--background)', borderColor: 'var(--card-border)', color: 'var(--foreground)' }} />
+                <input type="number" step="0.5" placeholder="reps" value={s.reps}
+                  onChange={e => setLogSets(prev => prev.map((r, j) => j === i ? { ...r, reps: e.target.value } : r))}
+                  className="px-2 py-1.5 rounded-lg border text-sm outline-none"
+                  style={{ background: 'var(--background)', borderColor: 'var(--card-border)', color: 'var(--foreground)' }} />
+                <button type="button" onClick={() => setLogSets(prev => prev.length > 1 ? prev.filter((_, j) => j !== i) : prev)}
+                  className="text-red-400 text-lg leading-none">×</button>
+              </div>
+            ))}
+            <button type="button" onClick={() => setLogSets(prev => [...prev, { weight_lbs: prev[prev.length - 1]?.weight_lbs ?? '', reps: '', notes: '' }])}
+              className="text-sm px-3 py-1 rounded-lg border"
+              style={{ borderColor: 'var(--card-border)', color: 'var(--accent)' }}>
+              + Add set
+            </button>
+            {logError && <p className="text-red-400 text-xs">{logError}</p>}
+            <button type="submit" disabled={logSaving}
+              className="w-full py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
+              style={{ background: 'var(--accent)' }}>
+              {logSaving ? 'Saving…' : 'Save'}
+            </button>
+          </form>
+        </div>
+      </div>
 
       <div className="space-y-3">
         {[...sessions].reverse().map((s) => {
