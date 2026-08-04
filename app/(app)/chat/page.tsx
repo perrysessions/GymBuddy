@@ -245,6 +245,7 @@ export default function ChatPage() {
   )
 
   return (
+    <>
     <div className="flex h-[calc(100vh-8rem)] gap-4 max-w-5xl mx-auto">
 
       {/* Desktop sidebar */}
@@ -410,5 +411,6 @@ export default function ChatPage() {
         </div>
       </div>
     )}
+    </>
   )
 }
