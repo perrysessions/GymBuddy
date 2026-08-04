@@ -337,7 +337,7 @@ export default function DashboardClient({ allExerciseRows, recentSessions, bodyW
               </button>
             ))}
           </div>
-          <div className="cursor-pointer" onClick={() => chartExerciseId && router.push(`/exercise/${chartExerciseId}`)}>
+          <div>
             <ResponsiveContainer width="100%" height={180}>
               <LineChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#2a2a2a" />
