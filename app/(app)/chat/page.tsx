@@ -70,6 +70,7 @@ export default function ChatPage() {
   const [showGoals, setShowGoals] = useState(false)
   const [goals, setGoals] = useState<{ id: string; content: string }[]>([])
   const [goalInput, setGoalInput] = useState('')
+  const [needsFullData, setNeedsFullData] = useState<{ message: string; reason: string } | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => { setUsedToday(getDailyUsage()) }, [])
@@ -125,11 +126,19 @@ export default function ChatPage() {
     setShowSidebar(false)
   }
 
-  async function send(text?: string) {
+  async function sendWithFullData() {
+    if (!needsFullData) return
+    const { message } = needsFullData
+    setNeedsFullData(null)
+    await send(message, true)
+  }
+
+  async function send(text?: string, fullData = false) {
     const content = (text ?? input).trim()
     if (!content || loading) return
-    setInput('')
+    if (!fullData) setInput('')
     setError('')
+    setNeedsFullData(null)
 
     const userMsg: Message = { role: 'user', content }
     const optimisticMessages = [...messages, userMsg]
@@ -161,7 +170,7 @@ export default function ChatPage() {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: content, history: messages }),
+      body: JSON.stringify({ message: content, history: messages, fullData }),
     })
 
     const data = await res.json()
@@ -172,12 +181,23 @@ export default function ChatPage() {
       return
     }
 
-    const assistantMsg: Message = { role: 'assistant', content: data.reply }
+    const reply: string = data.reply
+    const needsDataMatch = reply.match(/\[NEEDS_FULL_DATA:\s*(.+?)\]/)
+
+    if (needsDataMatch && !fullData) {
+      const reason = needsDataMatch[1].trim()
+      setNeedsFullData({ message: content, reason })
+      // Don't save this non-answer to the DB
+      setLoading(false)
+      return
+    }
+
+    const assistantMsg: Message = { role: 'assistant', content: reply }
     setMessages(prev => [...prev, assistantMsg])
     setUsedToday(incrementDailyUsage())
 
     // Save assistant message
-    await supabase.from('chat_messages').insert({ session_id: sessionId, role: 'assistant', content: data.reply })
+    await supabase.from('chat_messages').insert({ session_id: sessionId, role: 'assistant', content: reply })
     await supabase.from('chat_sessions').update({ updated_at: new Date().toISOString() }).eq('id', sessionId)
     fetchSessions()
   }
@@ -341,6 +361,26 @@ export default function ChatPage() {
             <div className="flex justify-start">
               <div className="px-4 py-2.5 rounded-2xl text-sm" style={{ background: 'var(--card)', color: 'var(--muted)' }}>
                 Thinking...
+              </div>
+            </div>
+          )}
+
+          {needsFullData && (
+            <div className="rounded-2xl border p-4 space-y-3" style={{ background: 'var(--card)', borderColor: 'var(--card-border)' }}>
+              <p className="text-sm" style={{ color: 'var(--muted)' }}>
+                To answer this, I need your full workout history: <span style={{ color: 'var(--foreground)' }}>{needsFullData.reason}</span>
+              </p>
+              <div className="flex gap-2">
+                <button onClick={sendWithFullData}
+                  className="px-4 py-2 rounded-xl text-sm font-semibold text-white"
+                  style={{ background: 'var(--accent)' }}>
+                  Load full history &amp; resend
+                </button>
+                <button onClick={() => setNeedsFullData(null)}
+                  className="px-4 py-2 rounded-xl text-sm"
+                  style={{ color: 'var(--muted)' }}>
+                  Cancel
+                </button>
               </div>
             </div>
           )}

@@ -17,25 +17,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'AI chat not enabled for your account.' }, { status: 403 })
   }
 
-  const { message, history } = await req.json()
+  const { message, history, fullData } = await req.json()
 
-  // Gather workout context for the system prompt
-  const ninetyDaysAgo = new Date()
-  ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90)
-
-  const { data: recentSets } = await supabase
-    .from('workout_sets')
-    .select('weight_lbs, reps, notes, exercises(name), workout_sessions!inner(date, user_id, notes)')
-    .eq('workout_sessions.user_id', user.id)
-    .gte('workout_sessions.date', ninetyDaysAgo.toISOString().split('T')[0])
-    .limit(500)
-
-  const { data: bodyWeights } = await supabase
-    .from('body_weight')
-    .select('date, weight_lbs')
-    .eq('user_id', user.id)
-    .order('date', { ascending: false })
-    .limit(20)
+  const thirtyDaysAgo = new Date()
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
 
   const { data: goals } = await supabase
     .from('user_goals')
@@ -43,46 +28,120 @@ export async function POST(req: NextRequest) {
     .eq('user_id', user.id)
     .order('created_at', { ascending: true })
 
-  // Build concise context string
-  const exerciseSummary: Record<string, { sessions: number; maxWeight: number; lastDate: string; injuries: string[] }> = {}
-  recentSets?.forEach((s: any) => {
-    const name = s.exercises?.name ?? 'Unknown'
-    const date = s.workout_sessions?.date ?? ''
-    const sessionNote = s.workout_sessions?.notes ?? ''
-    if (!exerciseSummary[name]) exerciseSummary[name] = { sessions: 0, maxWeight: 0, lastDate: '', injuries: [] }
-    exerciseSummary[name].sessions++
-    if ((s.weight_lbs ?? 0) > exerciseSummary[name].maxWeight) exerciseSummary[name].maxWeight = s.weight_lbs
-    if (date > exerciseSummary[name].lastDate) exerciseSummary[name].lastDate = date
-    if (sessionNote && /hurt|pain|injur|sore|tight|brace/i.test(sessionNote)) {
-      exerciseSummary[name].injuries.push(`${date}: ${sessionNote}`)
-    }
-  })
-
-  const exerciseLines = Object.entries(exerciseSummary)
-    .sort((a, b) => b[1].sessions - a[1].sessions)
-    .map(([name, data]) => {
-      const injuryNote = data.injuries.length > 0 ? ` [INJURY/NOTE: ${data.injuries.slice(-1)[0]}]` : ''
-      return `- ${name}: ${data.sessions} sets in 90 days, max ${data.maxWeight} lbs, last session ${data.lastDate}${injuryNote}`
-    })
-    .join('\n')
-
-  const weightLines = bodyWeights?.map(bw => `${bw.date}: ${bw.weight_lbs} lbs`).join(', ') ?? 'No data'
+  const { data: bodyWeights } = await supabase
+    .from('body_weight')
+    .select('date, weight_lbs')
+    .eq('user_id', user.id)
+    .order('date', { ascending: false })
+    .limit(10)
 
   const goalsLines = goals && goals.length > 0
     ? goals.map((g, i) => `${i + 1}. ${g.content}`).join('\n')
     : 'No goals set yet.'
+
+  const weightLines = bodyWeights?.map(bw => `${bw.date}: ${bw.weight_lbs} lbs`).join(', ') ?? 'No data'
+
+  let workoutContext: string
+
+  if (fullData) {
+    // Full raw data mode — fetch all sets ever
+    const { data: allSets } = await supabase
+      .from('workout_sets')
+      .select('weight_lbs, reps, notes, exercises(name), workout_sessions!inner(date, user_id, notes)')
+      .eq('workout_sessions.user_id', user.id)
+      .limit(500)
+
+    const byExercise: Record<string, string[]> = {}
+    allSets?.forEach((s: any) => {
+      const name = s.exercises?.name ?? 'Unknown'
+      const date = s.workout_sessions?.date ?? ''
+      const note = s.notes ? ` (note: ${s.notes})` : ''
+      if (!byExercise[name]) byExercise[name] = []
+      byExercise[name].push(`${date}: ${s.weight_lbs ?? 0}lbs × ${s.reps ?? 0} reps${note}`)
+    })
+
+    workoutContext = Object.entries(byExercise)
+      .map(([name, sets]) => `${name}:\n${sets.join('\n')}`)
+      .join('\n\n')
+
+    workoutContext = `FULL HISTORICAL DATA (all sets ever logged):\n\n${workoutContext}`
+  } else {
+    // Smart summary mode — recent detail + all-time summary
+    const { data: recentSets } = await supabase
+      .from('workout_sets')
+      .select('weight_lbs, reps, notes, exercises(name), workout_sessions!inner(date, user_id, notes)')
+      .eq('workout_sessions.user_id', user.id)
+      .gte('workout_sessions.date', thirtyDaysAgo.toISOString().split('T')[0])
+      .limit(300)
+
+    const { data: allSets } = await supabase
+      .from('workout_sets')
+      .select('weight_lbs, reps, exercises(name), workout_sessions!inner(date, user_id)')
+      .eq('workout_sessions.user_id', user.id)
+      .limit(500)
+
+    // Build all-time summary per exercise
+    const allTime: Record<string, { maxWeight: number; totalSets: number; firstDate: string; lastDate: string; weightHistory: number[] }> = {}
+    allSets?.forEach((s: any) => {
+      const name = s.exercises?.name ?? 'Unknown'
+      const date = s.workout_sessions?.date ?? ''
+      const w = s.weight_lbs ?? 0
+      if (!allTime[name]) allTime[name] = { maxWeight: 0, totalSets: 0, firstDate: date, lastDate: date, weightHistory: [] }
+      allTime[name].totalSets++
+      if (w > allTime[name].maxWeight) allTime[name].maxWeight = w
+      if (date < allTime[name].firstDate) allTime[name].firstDate = date
+      if (date > allTime[name].lastDate) allTime[name].lastDate = date
+      allTime[name].weightHistory.push(w)
+    })
+
+    // Build recent detail per exercise (last 30 days, grouped by session date)
+    const recent: Record<string, { date: string; weight: number; reps: number; note: string }[]> = {}
+    recentSets?.forEach((s: any) => {
+      const name = s.exercises?.name ?? 'Unknown'
+      const note = s.notes ?? ''
+      if (!recent[name]) recent[name] = []
+      recent[name].push({ date: s.workout_sessions?.date ?? '', weight: s.weight_lbs ?? 0, reps: s.reps ?? 0, note })
+    })
+
+    const summaryLines = Object.entries(allTime)
+      .sort((a, b) => b[1].totalSets - a[1].totalSets)
+      .map(([name, data]) => {
+        const trend = data.weightHistory.length >= 4
+          ? (() => {
+              const half = Math.floor(data.weightHistory.length / 2)
+              const early = data.weightHistory.slice(0, half).reduce((a, b) => a + b, 0) / half
+              const late = data.weightHistory.slice(-half).reduce((a, b) => a + b, 0) / half
+              return late > early * 1.05 ? '↑ trending up' : late < early * 0.95 ? '↓ trending down' : '→ stable'
+            })()
+          : ''
+        return `- ${name}: ${data.totalSets} total sets, max ${data.maxWeight} lbs, first logged ${data.firstDate}, last ${data.lastDate}${trend ? `, ${trend}` : ''}`
+      })
+      .join('\n')
+
+    const recentLines = Object.entries(recent)
+      .map(([name, sets]) => {
+        const rows = sets.map(s => `  ${s.date}: ${s.weight}lbs × ${s.reps} reps${s.note ? ` (${s.note})` : ''}`).join('\n')
+        return `${name}:\n${rows}`
+      })
+      .join('\n')
+
+    workoutContext = `ALL-TIME EXERCISE SUMMARY:\n${summaryLines}\n\nRECENT DETAIL (last 30 days):\n${recentLines}`
+  }
+
+  const dataNote = fullData
+    ? ''
+    : `\nIf a question requires a specific date, exact set, or granular detail not shown above, respond with [NEEDS_FULL_DATA: one sentence explaining what you need] and nothing else — the app will offer to reload with full history.`
 
   const systemPrompt = `You are a knowledgeable, encouraging fitness coach analyzing workout data for Perry.
 
 Perry's goals:
 ${goalsLines}
 
-Perry's recent workout data (last 90 days):
-${exerciseLines}
+${workoutContext}
 
 Perry's body weight (most recent first): ${weightLines}
 
-Always keep Perry's goals in mind when answering. Reference them when relevant — e.g. if a goal relates to weight, strength, or consistency, connect your answer to that goal. Use workout data to give specific, data-driven answers. Be concise and practical.`
+Always keep Perry's goals in mind when answering. Reference them when relevant. Use workout data to give specific, data-driven answers. Be concise and practical.${dataNote}`
 
   try {
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
