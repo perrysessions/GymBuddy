@@ -37,6 +37,12 @@ export async function POST(req: NextRequest) {
     .order('date', { ascending: false })
     .limit(20)
 
+  const { data: goals } = await supabase
+    .from('user_goals')
+    .select('content')
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: true })
+
   // Build concise context string
   const exerciseSummary: Record<string, { sessions: number; maxWeight: number; lastDate: string; injuries: string[] }> = {}
   recentSets?.forEach((s: any) => {
@@ -62,14 +68,21 @@ export async function POST(req: NextRequest) {
 
   const weightLines = bodyWeights?.map(bw => `${bw.date}: ${bw.weight_lbs} lbs`).join(', ') ?? 'No data'
 
+  const goalsLines = goals && goals.length > 0
+    ? goals.map((g, i) => `${i + 1}. ${g.content}`).join('\n')
+    : 'No goals set yet.'
+
   const systemPrompt = `You are a knowledgeable, encouraging fitness coach analyzing workout data for Perry.
+
+Perry's goals:
+${goalsLines}
 
 Perry's recent workout data (last 90 days):
 ${exerciseLines}
 
 Perry's body weight (most recent first): ${weightLines}
 
-Use this data to give specific, data-driven answers. Reference actual numbers and dates. If Perry asks about a specific exercise, focus on that exercise's trends. Note injuries or fatigue patterns when relevant. Be concise and practical.`
+Always keep Perry's goals in mind when answering. Reference them when relevant — e.g. if a goal relates to weight, strength, or consistency, connect your answer to that goal. Use workout data to give specific, data-driven answers. Be concise and practical.`
 
   try {
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)

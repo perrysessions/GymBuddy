@@ -106,6 +106,17 @@ create policy "delete exercises" on exercises
 
 alter table exercises enable row level security;
 
+-- User goals (referenced by AI chat)
+create table user_goals (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  content text not null,
+  created_at timestamptz default now()
+);
+alter table user_goals enable row level security;
+create policy "goals own" on user_goals
+  for all using (auth.uid() = user_id);
+
 -- Exercise wishlist
 create table exercise_wishlist (
   id uuid primary key default gen_random_uuid(),

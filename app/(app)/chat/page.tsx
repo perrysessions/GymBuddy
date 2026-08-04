@@ -67,9 +67,31 @@ export default function ChatPage() {
   const [error, setError] = useState('')
   const [usedToday, setUsedToday] = useState(0)
   const [showSidebar, setShowSidebar] = useState(false)
+  const [showGoals, setShowGoals] = useState(false)
+  const [goals, setGoals] = useState<{ id: string; content: string }[]>([])
+  const [goalInput, setGoalInput] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => { setUsedToday(getDailyUsage()) }, [])
+
+  useEffect(() => {
+    supabase.from('user_goals').select('id, content').order('created_at', { ascending: true })
+      .then(({ data }) => setGoals(data ?? []))
+  }, [])
+
+  async function addGoal() {
+    const content = goalInput.trim()
+    if (!content) return
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    const { data } = await supabase.from('user_goals').insert({ user_id: user.id, content }).select('id, content').single()
+    if (data) { setGoals(prev => [...prev, data]); setGoalInput('') }
+  }
+
+  async function deleteGoal(id: string) {
+    await supabase.from('user_goals').delete().eq('id', id)
+    setGoals(prev => prev.filter(g => g.id !== id))
+  }
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, loading])
 
   const fetchSessions = useCallback(async () => {
@@ -257,6 +279,11 @@ export default function ChatPage() {
                 ? (sessions.find(s => s.id === currentSessionId)?.title ?? 'Chat')
                 : 'AI Chat'}
             </h1>
+            <button onClick={() => setShowGoals(true)}
+              className="text-sm px-3 py-1.5 rounded-lg border"
+              style={{ borderColor: 'var(--card-border)', color: 'var(--muted)' }}>
+              Goals {goals.length > 0 ? `(${goals.length})` : ''}
+            </button>
             <button className="md:hidden text-sm px-3 py-1.5 rounded-lg text-white"
               style={{ background: 'var(--accent)' }}
               onClick={newChat}>
@@ -340,5 +367,48 @@ export default function ChatPage() {
         </div>
       </div>
     </div>
+
+    {/* Goals panel */}
+    {showGoals && (
+      <div className="fixed inset-0 z-50 flex flex-col justify-end md:items-center md:justify-center px-0 md:px-4">
+        <div className="absolute inset-0 bg-black/60" onClick={() => setShowGoals(false)} />
+        <div className="relative rounded-t-2xl md:rounded-2xl border p-6 w-full md:max-w-md space-y-4"
+          style={{ background: 'var(--card)', borderColor: 'var(--card-border)' }}>
+          <div className="flex items-center justify-between">
+            <h3 className="text-base font-semibold">My Goals</h3>
+            <button onClick={() => setShowGoals(false)} className="text-sm" style={{ color: 'var(--muted)' }}>✕</button>
+          </div>
+          <p className="text-xs" style={{ color: 'var(--muted)' }}>
+            The AI reads these before every response — add weight goals, strength targets, lifestyle goals, anything relevant.
+          </p>
+          <div className="flex gap-2">
+            <input
+              value={goalInput}
+              onChange={e => setGoalInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && addGoal()}
+              placeholder="e.g. Reach 180 lbs by December"
+              className="flex-1 px-3 py-2 rounded-lg border text-sm outline-none"
+              style={{ background: 'var(--background)', borderColor: 'var(--card-border)', color: 'var(--foreground)' }}
+            />
+            <button onClick={addGoal}
+              className="px-3 py-2 rounded-lg text-sm font-semibold text-white"
+              style={{ background: 'var(--accent)' }}>
+              Add
+            </button>
+          </div>
+          <div className="space-y-2 max-h-60 overflow-y-auto">
+            {goals.length === 0 && (
+              <p className="text-sm" style={{ color: 'var(--muted)' }}>No goals yet.</p>
+            )}
+            {goals.map(g => (
+              <div key={g.id} className="flex items-start gap-2 px-1">
+                <span className="text-sm flex-1">{g.content}</span>
+                <button onClick={() => deleteGoal(g.id)} className="text-xs shrink-0 mt-0.5" style={{ color: 'var(--muted)' }}>✕</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    )}
   )
 }
