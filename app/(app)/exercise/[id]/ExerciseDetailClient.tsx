@@ -501,11 +501,11 @@ export default function ExerciseDetailClient({ exercise, exerciseId, sessions: i
                 className="text-xs px-2 py-1 rounded-lg border outline-none"
                 style={{ background: 'var(--background)', borderColor: 'var(--card-border)', color: 'var(--foreground)' }} />
             </div>
-            <div className="grid text-xs font-medium" style={{ color: 'var(--muted)', gridTemplateColumns: '24px 1fr 1fr 28px' }}>
-              <span>#</span><span>Weight (lbs)</span><span>Reps</span><span />
+            <div className="grid text-xs font-medium" style={{ color: 'var(--muted)', gridTemplateColumns: '24px 1fr 1fr 1fr 28px' }}>
+              <span>#</span><span>Weight (lbs)</span><span>Reps</span><span>Notes</span><span />
             </div>
             {logSets.map((s, i) => (
-              <div key={i} className="grid items-center gap-1.5" style={{ gridTemplateColumns: '24px 1fr 1fr 28px' }}>
+              <div key={i} className="grid items-center gap-1.5" style={{ gridTemplateColumns: '24px 1fr 1fr 1fr 28px' }}>
                 <span className="text-xs" style={{ color: 'var(--muted)' }}>{i + 1}</span>
                 <input type="number" step="0.5" placeholder="lbs" value={s.weight_lbs}
                   onChange={e => setLogSets(prev => prev.map((r, j) => j === i ? { ...r, weight_lbs: e.target.value } : r))}
@@ -513,6 +513,10 @@ export default function ExerciseDetailClient({ exercise, exerciseId, sessions: i
                   style={{ background: 'var(--background)', borderColor: 'var(--card-border)', color: 'var(--foreground)' }} />
                 <input type="number" step="0.5" placeholder="reps" value={s.reps}
                   onChange={e => setLogSets(prev => prev.map((r, j) => j === i ? { ...r, reps: e.target.value } : r))}
+                  className="px-2 py-1.5 rounded-lg border text-sm outline-none"
+                  style={{ background: 'var(--background)', borderColor: 'var(--card-border)', color: 'var(--foreground)' }} />
+                <input type="text" placeholder="note" value={s.notes}
+                  onChange={e => setLogSets(prev => prev.map((r, j) => j === i ? { ...r, notes: e.target.value } : r))}
                   className="px-2 py-1.5 rounded-lg border text-sm outline-none"
                   style={{ background: 'var(--background)', borderColor: 'var(--card-border)', color: 'var(--foreground)' }} />
                 <button type="button" onClick={() => setLogSets(prev => prev.length > 1 ? prev.filter((_, j) => j !== i) : prev)}
