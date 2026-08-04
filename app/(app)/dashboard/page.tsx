@@ -50,6 +50,13 @@ export default async function DashboardPage() {
     .eq('user_id', user.id)
     .order('date', { ascending: false })
 
+  // Exercise wishlist
+  const { data: wishlist } = await supabase
+    .from('exercise_wishlist')
+    .select('id, name, done')
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: true })
+
   // Body weight last 6 months
   const sixMonthsAgo = new Date()
   sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6)
@@ -65,6 +72,7 @@ export default async function DashboardPage() {
       allExerciseRows={allExerciseRows}
       recentSessions={recentSessions ?? []}
       bodyWeights={bodyWeights ?? []}
+      wishlist={wishlist ?? []}
     />
   )
 }

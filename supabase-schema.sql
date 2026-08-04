@@ -105,3 +105,15 @@ create policy "delete exercises" on exercises
   for delete using (auth.uid() is not null);
 
 alter table exercises enable row level security;
+
+-- Exercise wishlist
+create table exercise_wishlist (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  name text not null,
+  done boolean not null default false,
+  created_at timestamptz default now()
+);
+alter table exercise_wishlist enable row level security;
+create policy "wishlist own" on exercise_wishlist
+  for all using (auth.uid() = user_id);

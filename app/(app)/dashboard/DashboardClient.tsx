@@ -8,10 +8,13 @@ import {
 } from 'recharts'
 import { createClient } from '@/lib/supabase'
 
+interface WishlistItem { id: string; name: string; done: boolean }
+
 interface Props {
   allExerciseRows: { exerciseId: string; name: string; category: string; date: string; weight_lbs: number; reps: number }[]
   recentSessions: { id: string; date: string; notes: string | null }[]
   bodyWeights: { date: string; weight_lbs: number }[]
+  wishlist: WishlistItem[]
 }
 
 const RANGE_OPTIONS = [
@@ -65,9 +68,31 @@ const CORR_METRICS: { key: CorrMetric; label: string; color: string }[] = [
   { key: 'weight',   label: 'Body Weight',      color: '#f48c06' },
 ]
 
-export default function DashboardClient({ allExerciseRows, recentSessions, bodyWeights: initialBodyWeights }: Props) {
+export default function DashboardClient({ allExerciseRows, recentSessions, bodyWeights: initialBodyWeights, wishlist: initialWishlist }: Props) {
   const router = useRouter()
   const supabase = createClient()
+  const [wishlist, setWishlist] = useState<WishlistItem[]>(initialWishlist)
+  const [wishInput, setWishInput] = useState('')
+  const [showDone, setShowDone] = useState(false)
+
+  async function addWishItem() {
+    const name = wishInput.trim()
+    if (!name) return
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    const { data } = await supabase.from('exercise_wishlist').insert({ user_id: user.id, name }).select('id, name, done').single()
+    if (data) { setWishlist(prev => [...prev, data]); setWishInput('') }
+  }
+
+  async function checkOffWishItem(id: string) {
+    await supabase.from('exercise_wishlist').update({ done: true }).eq('id', id)
+    setWishlist(prev => prev.map(w => w.id === id ? { ...w, done: true } : w))
+  }
+
+  async function deleteWishItem(id: string) {
+    await supabase.from('exercise_wishlist').delete().eq('id', id)
+    setWishlist(prev => prev.filter(w => w.id !== id))
+  }
   const [sessionSearch, setSessionSearch] = useState('')
   const [exerciseDays, setExerciseDays] = useState(0)
   const [selectedExerciseId, setSelectedExerciseId] = useState<string | null>(null)
@@ -556,6 +581,57 @@ export default function DashboardClient({ allExerciseRows, recentSessions, bodyW
           </ResponsiveContainer>
         </Card>
       )}
+
+      {/* Exercises to Try */}
+      <Card>
+        <div className="flex items-center justify-between mb-3">
+          <SectionTitle>Exercises to Try</SectionTitle>
+          {wishlist.some(w => w.done) && (
+            <button onClick={() => setShowDone(v => !v)}
+              className="text-xs" style={{ color: 'var(--muted)' }}>
+              {showDone ? 'Hide completed' : `View completed (${wishlist.filter(w => w.done).length})`}
+            </button>
+          )}
+        </div>
+        <div className="flex gap-2 mb-3">
+          <input
+            value={wishInput}
+            onChange={e => setWishInput(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && addWishItem()}
+            placeholder="Add an exercise…"
+            className="flex-1 px-3 py-2 rounded-lg border text-sm outline-none"
+            style={{ background: 'var(--background)', borderColor: 'var(--card-border)', color: 'var(--foreground)' }}
+          />
+          <button onClick={addWishItem}
+            className="px-3 py-2 rounded-lg text-sm font-semibold text-white"
+            style={{ background: 'var(--accent)' }}>
+            Add
+          </button>
+        </div>
+        <div className="space-y-1.5">
+          {wishlist.filter(w => !w.done).map(w => (
+            <div key={w.id} className="flex items-center gap-2 px-1">
+              <button onClick={() => checkOffWishItem(w.id)}
+                className="w-4 h-4 rounded border shrink-0 flex items-center justify-center transition-colors"
+                style={{ borderColor: 'var(--card-border)' }} />
+              <span className="text-sm flex-1">{w.name}</span>
+            </div>
+          ))}
+          {wishlist.filter(w => !w.done).length === 0 && wishlist.filter(w => w.done).length === 0 && (
+            <p className="text-sm" style={{ color: 'var(--muted)' }}>No exercises added yet.</p>
+          )}
+          {showDone && wishlist.filter(w => w.done).map(w => (
+            <div key={w.id} className="flex items-center gap-2 px-1">
+              <div className="w-4 h-4 rounded border shrink-0 flex items-center justify-center"
+                style={{ borderColor: 'var(--accent)', background: 'var(--accent)' }}>
+                <span className="text-white text-xs leading-none">✓</span>
+              </div>
+              <span className="text-sm flex-1 line-through" style={{ color: 'var(--muted)' }}>{w.name}</span>
+              <button onClick={() => deleteWishItem(w.id)} className="text-xs" style={{ color: 'var(--muted)' }}>✕</button>
+            </div>
+          ))}
+        </div>
+      </Card>
     </div>
   )
 }
