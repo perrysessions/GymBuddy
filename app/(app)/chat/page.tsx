@@ -3,6 +3,24 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
 
+function renderMarkdown(text: string) {
+  // Split into lines, then process inline bold/italic per line
+  return text.split('\n').map((line, li) => {
+    const parts: React.ReactNode[] = []
+    const re = /(\*\*(.+?)\*\*|\*(.+?)\*)/g
+    let last = 0, m: RegExpExecArray | null
+    let key = 0
+    while ((m = re.exec(line)) !== null) {
+      if (m.index > last) parts.push(line.slice(last, m.index))
+      if (m[2]) parts.push(<strong key={key++}>{m[2]}</strong>)
+      else if (m[3]) parts.push(<em key={key++}>{m[3]}</em>)
+      last = m.index + m[0].length
+    }
+    if (last < line.length) parts.push(line.slice(last))
+    return <span key={li}>{parts}{li < text.split('\n').length - 1 ? <br /> : null}</span>
+  })
+}
+
 interface Message { id?: string; role: 'user' | 'assistant'; content: string }
 interface Session { id: string; title: string; updated_at: string }
 
@@ -286,7 +304,7 @@ export default function ChatPage() {
                   color: m.role === 'user' ? '#fff' : 'var(--foreground)',
                   borderRadius: m.role === 'user' ? '1rem 1rem 0.25rem 1rem' : '1rem 1rem 1rem 0.25rem',
                 }}>
-                {m.content}
+                {m.role === 'assistant' ? renderMarkdown(m.content) : m.content}
               </div>
             </div>
           ))}
@@ -305,13 +323,13 @@ export default function ChatPage() {
 
         {/* Input */}
         <div className="shrink-0 flex gap-2 pt-2 border-t" style={{ borderColor: 'var(--card-border)' }}>
-          <input
-            type="text"
+          <textarea
             value={input}
             onChange={e => setInput(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send()}
+            onKeyDown={e => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), send())}
             placeholder="Ask about your workouts..."
-            className="flex-1 px-4 py-2.5 rounded-xl border text-sm outline-none"
+            rows={3}
+            className="flex-1 px-4 py-2.5 rounded-xl border text-sm outline-none resize-none"
             style={{ background: 'var(--card)', borderColor: 'var(--card-border)', color: 'var(--foreground)' }}
           />
           <button onClick={() => send()} disabled={!input.trim() || loading}
