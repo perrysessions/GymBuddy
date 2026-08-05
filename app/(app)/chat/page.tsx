@@ -295,11 +295,13 @@ export default function ChatPage() {
               onClick={() => setShowSidebar(true)}>
               ☰ Chats
             </button>
-            <h1 className="text-xl font-bold flex-1">
+            {/* Title inline on desktop, hidden here on mobile */}
+            <h1 className="hidden md:block text-xl font-bold flex-1">
               {currentSessionId
                 ? (sessions.find(s => s.id === currentSessionId)?.title ?? 'Chat')
                 : 'AI Chat'}
             </h1>
+            <div className="flex-1 md:hidden" />
             <button onClick={() => setShowGoals(true)}
               className="text-sm px-3 py-1.5 rounded-lg border"
               style={{ borderColor: 'var(--card-border)', color: 'var(--muted)' }}>
@@ -311,6 +313,12 @@ export default function ChatPage() {
               + New
             </button>
           </div>
+          {/* Title on its own row on mobile */}
+          {currentSessionId && (
+            <h1 className="md:hidden text-base font-semibold truncate" style={{ color: 'var(--muted)' }}>
+              {sessions.find(s => s.id === currentSessionId)?.title ?? 'Chat'}
+            </h1>
+          )}
           <div className="flex items-center justify-between text-xs" style={{ color: 'var(--muted)' }}>
             <span>{remaining} of {DAILY_LIMIT} chats remaining today</span>
             <span>{usedToday} used</span>
