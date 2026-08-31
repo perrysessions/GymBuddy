@@ -35,11 +35,33 @@ export async function POST(req: NextRequest) {
     .order('date', { ascending: false })
     .limit(10)
 
+  const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0]
+  const { data: nutritionRows } = await supabase
+    .from('nutrition_logs')
+    .select('date, calories, protein_g, carbs_g, fat_g')
+    .eq('user_id', user.id)
+    .gte('date', thirtyDaysAgoStr)
+    .order('date')
+
   const goalsLines = goals && goals.length > 0
     ? goals.map((g, i) => `${i + 1}. ${g.content}`).join('\n')
     : 'No goals set yet.'
 
   const weightLines = bodyWeights?.map(bw => `${bw.date}: ${bw.weight_lbs} lbs`).join(', ') ?? 'No data'
+
+  // Build daily nutrition summary
+  const nutritionByDay: Record<string, { cal: number; pro: number }> = {}
+  nutritionRows?.forEach((r: any) => {
+    if (!nutritionByDay[r.date]) nutritionByDay[r.date] = { cal: 0, pro: 0 }
+    nutritionByDay[r.date].cal += r.calories ?? 0
+    nutritionByDay[r.date].pro += r.protein_g ?? 0
+  })
+  const nutritionDays = Object.entries(nutritionByDay)
+  const avgCal = nutritionDays.length ? Math.round(nutritionDays.reduce((s, [, v]) => s + v.cal, 0) / nutritionDays.length) : null
+  const avgPro = nutritionDays.length ? Math.round(nutritionDays.reduce((s, [, v]) => s + v.pro, 0) / nutritionDays.length) : null
+  const nutritionSummary = nutritionDays.length
+    ? `${nutritionDays.length} days logged in last 30 days. Avg: ${avgCal} kcal/day, ${avgPro}g protein/day.`
+    : 'No nutrition data logged yet.'
 
   let workoutContext: string
 
@@ -140,6 +162,8 @@ ${goalsLines}
 ${workoutContext}
 
 Perry's body weight (most recent first): ${weightLines}
+
+Perry's nutrition (last 30 days): ${nutritionSummary}
 
 Always keep Perry's goals in mind when answering. Reference them when relevant. Use workout data to give specific, data-driven answers. Be concise and practical.${dataNote}`
 

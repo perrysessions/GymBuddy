@@ -117,6 +117,27 @@ alter table user_goals enable row level security;
 create policy "goals own" on user_goals
   for all using (auth.uid() = user_id);
 
+-- Nutrition log
+create table nutrition_logs (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  date date not null,
+  food text not null,
+  calories int,
+  protein_g numeric(5,1),
+  carbs_g numeric(5,1),
+  fat_g numeric(5,1),
+  created_at timestamptz default now()
+);
+alter table nutrition_logs enable row level security;
+create policy "nutrition own" on nutrition_logs
+  for all using (auth.uid() = user_id);
+
+-- Nutrition targets (added to user_profiles)
+alter table user_profiles
+  add column if not exists calorie_target int default 2500,
+  add column if not exists protein_target int default 180;
+
 -- Exercise wishlist
 create table exercise_wishlist (
   id uuid primary key default gen_random_uuid(),
