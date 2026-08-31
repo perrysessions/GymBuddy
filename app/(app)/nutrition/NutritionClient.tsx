@@ -47,6 +47,7 @@ export default function NutritionClient({ todayLogs: initial, history: initialHi
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editForm, setEditForm] = useState(EMPTY)
   const [saving, setSaving] = useState(false)
+  const [estimating, setEstimating] = useState(false)
   const [loadingDate, setLoadingDate] = useState(false)
   const [error, setError] = useState('')
   const [showTargets, setShowTargets] = useState(false)
@@ -89,6 +90,27 @@ export default function NutritionClient({ todayLogs: initial, history: initialHi
     const { data } = await supabase.from('nutrition_logs').select('*').eq('date', date).order('created_at')
     setLogs((data ?? []) as Log[])
     setLoadingDate(false)
+  }
+
+  async function estimateMacros() {
+    if (!form.food.trim()) { setError('Enter a food name first'); return }
+    setError('')
+    setEstimating(true)
+    const res = await fetch('/api/estimate-nutrition', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ food: form.food }),
+    })
+    const data = await res.json()
+    setEstimating(false)
+    if (!res.ok) { setError(data.error ?? 'Could not estimate'); return }
+    setForm(f => ({
+      ...f,
+      calories: data.calories != null ? String(data.calories) : f.calories,
+      protein: data.protein_g != null ? String(data.protein_g) : f.protein,
+      carbs: data.carbs_g != null ? String(data.carbs_g) : f.carbs,
+      fat: data.fat_g != null ? String(data.fat_g) : f.fat,
+    }))
   }
 
   async function addEntry() {
@@ -241,11 +263,18 @@ export default function NutritionClient({ todayLogs: initial, history: initialHi
       {/* Quick-add form */}
       <div className="rounded-xl border p-4 space-y-3" style={{ background: 'var(--card)', borderColor: 'var(--card-border)' }}>
         <p className="text-sm font-semibold">Add Food</p>
-        <input value={form.food} onChange={e => setForm(f => ({ ...f, food: e.target.value }))}
-          onKeyDown={e => e.key === 'Enter' && addEntry()}
-          placeholder="Food name (e.g. Chicken breast, 6oz)"
-          className="w-full px-3 py-2 rounded-lg border text-sm outline-none"
-          style={{ background: 'var(--background)', borderColor: 'var(--card-border)', color: 'var(--foreground)' }} />
+        <div className="flex gap-2">
+          <input value={form.food} onChange={e => setForm(f => ({ ...f, food: e.target.value }))}
+            onKeyDown={e => e.key === 'Enter' && addEntry()}
+            placeholder="Food name (e.g. Chicken breast, 6oz)"
+            className="flex-1 px-3 py-2 rounded-lg border text-sm outline-none"
+            style={{ background: 'var(--background)', borderColor: 'var(--card-border)', color: 'var(--foreground)' }} />
+          <button onClick={estimateMacros} disabled={estimating || !form.food.trim()}
+            className="shrink-0 px-3 py-2 rounded-lg border text-sm font-medium disabled:opacity-40"
+            style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>
+            {estimating ? '…' : 'Estimate'}
+          </button>
+        </div>
         <div className="grid grid-cols-4 gap-2">
           {(['calories', 'protein', 'carbs', 'fat'] as const).map(field => (
             <input key={field} type="number" value={form[field]}
