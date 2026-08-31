@@ -276,12 +276,20 @@ export default function NutritionClient({ todayLogs: initial, history: initialHi
           </button>
         </div>
         <div className="grid grid-cols-4 gap-2">
-          {(['calories', 'protein', 'carbs', 'fat'] as const).map(field => (
-            <input key={field} type="number" value={form[field]}
-              onChange={e => setForm(f => ({ ...f, [field]: e.target.value }))}
-              placeholder={field === 'calories' ? 'Cal' : field.charAt(0).toUpperCase() + field.slice(1) + ' g'}
-              className="w-full px-2 py-2 rounded-lg border text-sm outline-none text-center"
-              style={{ background: 'var(--background)', borderColor: 'var(--card-border)', color: 'var(--foreground)' }} />
+          {([
+            { key: 'calories', label: 'Cal' },
+            { key: 'protein', label: 'Protein' },
+            { key: 'carbs', label: 'Carbs' },
+            { key: 'fat', label: 'Fat' },
+          ] as const).map(({ key, label }) => (
+            <div key={key} className="space-y-1">
+              <p className="text-xs text-center" style={{ color: 'var(--muted)' }}>{label}</p>
+              <input type="number" value={form[key]}
+                onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
+                placeholder="—"
+                className="w-full px-2 py-2 rounded-lg border text-sm outline-none text-center"
+                style={{ background: 'var(--background)', borderColor: 'var(--card-border)', color: 'var(--foreground)' }} />
+            </div>
           ))}
         </div>
         {error && <p className="text-red-400 text-xs">{error}</p>}
