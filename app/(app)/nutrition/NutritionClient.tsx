@@ -40,9 +40,11 @@ const EMPTY = { food: '', calories: '', protein: '', carbs: '', fat: '' }
 export default function NutritionClient({ todayLogs: initial, history, today, calorieTarget, proteinTarget }: Props) {
   const supabase = createClient()
   const router = useRouter()
+  const [selectedDate, setSelectedDate] = useState(today)
   const [logs, setLogs] = useState<Log[]>(initial)
   const [form, setForm] = useState(EMPTY)
   const [saving, setSaving] = useState(false)
+  const [loadingDate, setLoadingDate] = useState(false)
   const [error, setError] = useState('')
   const [showTargets, setShowTargets] = useState(false)
   const [calTarget, setCalTarget] = useState(String(calorieTarget))
@@ -69,6 +71,14 @@ export default function NutritionClient({ todayLogs: initial, history, today, ca
     })
   }
 
+  async function changeDate(date: string) {
+    setSelectedDate(date)
+    setLoadingDate(true)
+    const { data } = await supabase.from('nutrition_logs').select('*').eq('date', date).order('created_at')
+    setLogs((data ?? []) as Log[])
+    setLoadingDate(false)
+  }
+
   async function addEntry() {
     if (!form.food.trim()) { setError('Food name required'); return }
     setError('')
@@ -77,7 +87,7 @@ export default function NutritionClient({ todayLogs: initial, history, today, ca
     if (!user) { setSaving(false); return }
     const { data, error: err } = await supabase.from('nutrition_logs').insert({
       user_id: user.id,
-      date: today,
+      date: selectedDate,
       food: form.food.trim(),
       calories: form.calories ? parseInt(form.calories) : null,
       protein_g: form.protein ? parseFloat(form.protein) : null,
@@ -120,6 +130,21 @@ export default function NutritionClient({ todayLogs: initial, history, today, ca
         </button>
       </div>
 
+      {/* Date selector */}
+      <div className="flex items-center gap-2">
+        <input type="date" value={selectedDate} max={today}
+          onChange={e => changeDate(e.target.value)}
+          className="px-3 py-2 rounded-lg border text-sm outline-none flex-1"
+          style={{ background: 'var(--card)', borderColor: 'var(--card-border)', color: 'var(--foreground)' }} />
+        {selectedDate !== today && (
+          <button onClick={() => changeDate(today)}
+            className="text-xs px-3 py-2 rounded-lg border"
+            style={{ borderColor: 'var(--card-border)', color: 'var(--muted)' }}>
+            Today
+          </button>
+        )}
+      </div>
+
       {showTargets && (
         <div className="rounded-xl border p-4 space-y-3" style={{ background: 'var(--card)', borderColor: 'var(--card-border)' }}>
           <p className="text-sm font-medium">Daily Targets</p>
@@ -147,7 +172,10 @@ export default function NutritionClient({ todayLogs: initial, history, today, ca
 
       {/* Today's totals */}
       <div className="rounded-xl border p-4 space-y-3" style={{ background: 'var(--card)', borderColor: 'var(--card-border)' }}>
-        <p className="text-sm font-semibold">Today</p>
+        <p className="text-sm font-semibold">
+          {selectedDate === today ? 'Today' : new Date(selectedDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+          {loadingDate && <span className="text-xs font-normal ml-2" style={{ color: 'var(--muted)' }}>Loading…</span>}
+        </p>
         <div className="grid grid-cols-4 gap-2 text-center">
           {[
             { label: 'Calories', value: totalCal, unit: 'kcal', color: 'var(--accent)', target: calorieTarget },
