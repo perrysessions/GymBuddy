@@ -37,12 +37,15 @@ function ProgressBar({ value, target, color }: { value: number; target: number; 
 
 const EMPTY = { food: '', calories: '', protein: '', carbs: '', fat: '' }
 
-export default function NutritionClient({ todayLogs: initial, history, today, calorieTarget, proteinTarget }: Props) {
+export default function NutritionClient({ todayLogs: initial, history: initialHistory, today, calorieTarget, proteinTarget }: Props) {
   const supabase = createClient()
   const router = useRouter()
   const [selectedDate, setSelectedDate] = useState(today)
   const [logs, setLogs] = useState<Log[]>(initial)
+  const [historyRows, setHistoryRows] = useState<HistoryRow[]>(initialHistory)
   const [form, setForm] = useState(EMPTY)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState(EMPTY)
   const [saving, setSaving] = useState(false)
   const [loadingDate, setLoadingDate] = useState(false)
   const [error, setError] = useState('')
@@ -57,13 +60,22 @@ export default function NutritionClient({ todayLogs: initial, history, today, ca
   const totalCarbs = logs.reduce((s, l) => s + (l.carbs_g ?? 0), 0)
   const totalFat = logs.reduce((s, l) => s + (l.fat_g ?? 0), 0)
 
+  function updateHistory(date: string, newLogs: Log[]) {
+    const dayTotal = { calories: newLogs.reduce((s, l) => s + (l.calories ?? 0), 0), protein_g: newLogs.reduce((s, l) => s + (l.protein_g ?? 0), 0) }
+    setHistoryRows(prev => {
+      const filtered = prev.filter(r => r.date !== date)
+      if (newLogs.length === 0) return filtered
+      return [...filtered, { date, calories: dayTotal.calories, protein_g: dayTotal.protein_g }]
+    })
+  }
+
   // Build weekly chart data (last 7 days)
   const last7: { label: string; calories: number; protein: number }[] = []
   for (let i = 6; i >= 0; i--) {
     const d = new Date()
     d.setDate(d.getDate() - i)
     const dateStr = d.toISOString().split('T')[0]
-    const rows = history.filter(r => r.date === dateStr)
+    const rows = historyRows.filter(r => r.date === dateStr)
     last7.push({
       label: d.toLocaleDateString('en-US', { weekday: 'short' }),
       calories: rows.reduce((s, r) => s + (r.calories ?? 0), 0),
@@ -96,13 +108,46 @@ export default function NutritionClient({ todayLogs: initial, history, today, ca
     }).select('*').single()
     setSaving(false)
     if (err) { setError(err.message); return }
-    if (data) setLogs(prev => [...prev, data as Log])
+    if (data) {
+      const next = [...logs, data as Log]
+      setLogs(next)
+      updateHistory(selectedDate, next)
+    }
     setForm(EMPTY)
   }
 
   async function deleteEntry(id: string) {
     await supabase.from('nutrition_logs').delete().eq('id', id)
-    setLogs(prev => prev.filter(l => l.id !== id))
+    const next = logs.filter(l => l.id !== id)
+    setLogs(next)
+    updateHistory(selectedDate, next)
+    if (editingId === id) setEditingId(null)
+  }
+
+  function startEdit(log: Log) {
+    setEditingId(log.id)
+    setEditForm({
+      food: log.food,
+      calories: log.calories != null ? String(log.calories) : '',
+      protein: log.protein_g != null ? String(log.protein_g) : '',
+      carbs: log.carbs_g != null ? String(log.carbs_g) : '',
+      fat: log.fat_g != null ? String(log.fat_g) : '',
+    })
+  }
+
+  async function saveEdit(id: string) {
+    const updates = {
+      food: editForm.food.trim(),
+      calories: editForm.calories ? parseInt(editForm.calories) : null,
+      protein_g: editForm.protein ? parseFloat(editForm.protein) : null,
+      carbs_g: editForm.carbs ? parseFloat(editForm.carbs) : null,
+      fat_g: editForm.fat ? parseFloat(editForm.fat) : null,
+    }
+    await supabase.from('nutrition_logs').update(updates).eq('id', id)
+    const next = logs.map(l => l.id === id ? { ...l, ...updates } : l)
+    setLogs(next)
+    updateHistory(selectedDate, next)
+    setEditingId(null)
   }
 
   async function saveTargets() {
@@ -222,19 +267,49 @@ export default function NutritionClient({ todayLogs: initial, history, today, ca
       {logs.length > 0 && (
         <div className="rounded-xl border divide-y" style={{ background: 'var(--card)', borderColor: 'var(--card-border)' }}>
           {logs.map(log => (
-            <div key={log.id} className="flex items-center gap-3 px-4 py-3">
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{log.food}</p>
-                <p className="text-xs" style={{ color: 'var(--muted)' }}>
-                  {[
-                    log.calories != null && `${log.calories} kcal`,
-                    log.protein_g != null && `${log.protein_g}g protein`,
-                    log.carbs_g != null && `${log.carbs_g}g carbs`,
-                    log.fat_g != null && `${log.fat_g}g fat`,
-                  ].filter(Boolean).join(' · ')}
-                </p>
-              </div>
-              <button onClick={() => deleteEntry(log.id)} className="text-xs shrink-0" style={{ color: 'var(--muted)' }}>✕</button>
+            <div key={log.id} className="px-4 py-3 space-y-2">
+              {editingId === log.id ? (
+                <>
+                  <input value={editForm.food} onChange={e => setEditForm(f => ({ ...f, food: e.target.value }))}
+                    className="w-full px-3 py-1.5 rounded-lg border text-sm outline-none"
+                    style={{ background: 'var(--background)', borderColor: 'var(--card-border)', color: 'var(--foreground)' }} />
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {(['calories', 'protein', 'carbs', 'fat'] as const).map(f => (
+                      <input key={f} type="number" value={editForm[f]}
+                        onChange={e => setEditForm(ef => ({ ...ef, [f]: e.target.value }))}
+                        placeholder={f === 'calories' ? 'Cal' : f.charAt(0).toUpperCase() + f.slice(1) + ' g'}
+                        className="w-full px-2 py-1.5 rounded-lg border text-xs outline-none text-center"
+                        style={{ background: 'var(--background)', borderColor: 'var(--card-border)', color: 'var(--foreground)' }} />
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={() => saveEdit(log.id)}
+                      className="text-xs px-3 py-1.5 rounded-lg text-white font-semibold"
+                      style={{ background: 'var(--accent)' }}>Save</button>
+                    <button onClick={() => setEditingId(null)}
+                      className="text-xs px-3 py-1.5 rounded-lg"
+                      style={{ color: 'var(--muted)' }}>Cancel</button>
+                    <button onClick={() => deleteEntry(log.id)}
+                      className="text-xs px-3 py-1.5 rounded-lg ml-auto"
+                      style={{ color: '#ef4444' }}>Delete</button>
+                  </div>
+                </>
+              ) : (
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{log.food}</p>
+                    <p className="text-xs" style={{ color: 'var(--muted)' }}>
+                      {[
+                        log.calories != null && `${log.calories} kcal`,
+                        log.protein_g != null && `${log.protein_g}g protein`,
+                        log.carbs_g != null && `${log.carbs_g}g carbs`,
+                        log.fat_g != null && `${log.fat_g}g fat`,
+                      ].filter(Boolean).join(' · ')}
+                    </p>
+                  </div>
+                  <button onClick={() => startEdit(log)} className="text-xs shrink-0 px-2" style={{ color: 'var(--muted)' }}>Edit</button>
+                </div>
+              )}
             </div>
           ))}
         </div>
