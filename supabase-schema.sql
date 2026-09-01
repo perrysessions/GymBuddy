@@ -127,6 +127,7 @@ create table nutrition_logs (
   protein_g numeric(5,1),
   carbs_g numeric(5,1),
   fat_g numeric(5,1),
+  sugar_g numeric(5,1),
   created_at timestamptz default now()
 );
 alter table nutrition_logs enable row level security;

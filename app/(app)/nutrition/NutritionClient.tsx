@@ -14,6 +14,7 @@ interface Log {
   protein_g: number | null
   carbs_g: number | null
   fat_g: number | null
+  sugar_g: number | null
 }
 
 interface HistoryRow { date: string; calories: number | null; protein_g: number | null }
@@ -44,7 +45,7 @@ function ProgressBar({ value, target, color }: { value: number; target: number; 
   )
 }
 
-const EMPTY = { food: '', calories: '', protein: '', carbs: '', fat: '' }
+const EMPTY = { food: '', calories: '', protein: '', carbs: '', fat: '', sugar: '' }
 
 export default function NutritionClient({ history: initialHistory, calorieTarget, proteinTarget }: Props) {
   const supabase = createClient()
@@ -70,6 +71,7 @@ export default function NutritionClient({ history: initialHistory, calorieTarget
   const totalPro = logs.reduce((s, l) => s + (l.protein_g ?? 0), 0)
   const totalCarbs = logs.reduce((s, l) => s + (l.carbs_g ?? 0), 0)
   const totalFat = logs.reduce((s, l) => s + (l.fat_g ?? 0), 0)
+  const totalSugar = logs.reduce((s, l) => s + (l.sugar_g ?? 0), 0)
 
   const loadLogs = useCallback(async (date: string) => {
     setLoadingDate(true)
@@ -126,6 +128,7 @@ export default function NutritionClient({ history: initialHistory, calorieTarget
       protein: data.protein_g != null ? String(data.protein_g) : f.protein,
       carbs: data.carbs_g != null ? String(data.carbs_g) : f.carbs,
       fat: data.fat_g != null ? String(data.fat_g) : f.fat,
+      sugar: data.sugar_g != null ? String(data.sugar_g) : f.sugar,
     }))
   }
 
@@ -143,6 +146,7 @@ export default function NutritionClient({ history: initialHistory, calorieTarget
       protein_g: form.protein ? parseFloat(form.protein) : null,
       carbs_g: form.carbs ? parseFloat(form.carbs) : null,
       fat_g: form.fat ? parseFloat(form.fat) : null,
+      sugar_g: form.sugar ? parseFloat(form.sugar) : null,
     }).select('*').single()
     setSaving(false)
     if (err) { setError(err.message); return }
@@ -170,6 +174,7 @@ export default function NutritionClient({ history: initialHistory, calorieTarget
       protein: log.protein_g != null ? String(log.protein_g) : '',
       carbs: log.carbs_g != null ? String(log.carbs_g) : '',
       fat: log.fat_g != null ? String(log.fat_g) : '',
+      sugar: log.sugar_g != null ? String(log.sugar_g) : '',
     })
   }
 
@@ -180,6 +185,7 @@ export default function NutritionClient({ history: initialHistory, calorieTarget
       protein_g: editForm.protein ? parseFloat(editForm.protein) : null,
       carbs_g: editForm.carbs ? parseFloat(editForm.carbs) : null,
       fat_g: editForm.fat ? parseFloat(editForm.fat) : null,
+      sugar_g: editForm.sugar ? parseFloat(editForm.sugar) : null,
     }
     await supabase.from('nutrition_logs').update(updates).eq('id', id)
     const next = logs.map(l => l.id === id ? { ...l, ...updates } : l)
@@ -269,12 +275,13 @@ export default function NutritionClient({ history: initialHistory, calorieTarget
           {selectedDate === today ? 'Today' : new Date(selectedDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
           {loadingDate && <span className="text-xs font-normal ml-2" style={{ color: 'var(--muted)' }}>Loading…</span>}
         </p>
-        <div className="grid grid-cols-4 gap-2 text-center">
+        <div className="grid grid-cols-5 gap-2 text-center">
           {[
             { label: 'Calories', value: totalCal, unit: 'kcal', color: 'var(--accent)', target: calorieTarget },
             { label: 'Protein', value: totalPro, unit: 'g', color: '#22c55e', target: proteinTarget },
             { label: 'Carbs', value: totalCarbs, unit: 'g', color: '#3b82f6', target: null },
             { label: 'Fat', value: totalFat, unit: 'g', color: '#a855f7', target: null },
+            { label: 'Sugar', value: totalSugar, unit: 'g', color: '#f59e0b', target: null },
           ].map(({ label, value, unit, color, target }) => (
             <div key={label} className="space-y-1">
               <p className="text-xs" style={{ color: 'var(--muted)' }}>{label}</p>
@@ -301,12 +308,13 @@ export default function NutritionClient({ history: initialHistory, calorieTarget
             {estimating ? '…' : 'Estimate'}
           </button>
         </div>
-        <div className="grid grid-cols-4 gap-2">
+        <div className="grid grid-cols-5 gap-1.5">
           {([
             { key: 'calories', label: 'Cal' },
             { key: 'protein', label: 'Protein' },
             { key: 'carbs', label: 'Carbs' },
             { key: 'fat', label: 'Fat' },
+            { key: 'sugar', label: 'Sugar' },
           ] as const).map(({ key, label }) => (
             <div key={key} className="space-y-1">
               <p className="text-xs text-center" style={{ color: 'var(--muted)' }}>{label}</p>
@@ -336,8 +344,8 @@ export default function NutritionClient({ history: initialHistory, calorieTarget
                   <input value={editForm.food} onChange={e => setEditForm(f => ({ ...f, food: e.target.value }))}
                     className="w-full px-3 py-1.5 rounded-lg border text-sm outline-none"
                     style={{ background: 'var(--background)', borderColor: 'var(--card-border)', color: 'var(--foreground)' }} />
-                  <div className="grid grid-cols-4 gap-1.5">
-                    {(['calories', 'protein', 'carbs', 'fat'] as const).map(f => (
+                  <div className="grid grid-cols-5 gap-1.5">
+                    {(['calories', 'protein', 'carbs', 'fat', 'sugar'] as const).map(f => (
                       <input key={f} type="number" value={editForm[f]}
                         onChange={e => setEditForm(ef => ({ ...ef, [f]: e.target.value }))}
                         placeholder={f === 'calories' ? 'Cal' : f.charAt(0).toUpperCase() + f.slice(1) + ' g'}
@@ -367,6 +375,7 @@ export default function NutritionClient({ history: initialHistory, calorieTarget
                         log.protein_g != null && `${log.protein_g}g protein`,
                         log.carbs_g != null && `${log.carbs_g}g carbs`,
                         log.fat_g != null && `${log.fat_g}g fat`,
+                        log.sugar_g != null && `${log.sugar_g}g sugar`,
                       ].filter(Boolean).join(' · ')}
                     </p>
                   </div>

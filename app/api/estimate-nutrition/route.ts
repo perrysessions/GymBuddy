@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
   const prompt = `Estimate the macros for: "${food.trim()}"
 
 Reply with ONLY a JSON object, no markdown, no explanation:
-{"calories":NUMBER,"protein_g":NUMBER,"carbs_g":NUMBER,"fat_g":NUMBER}
+{"calories":NUMBER,"protein_g":NUMBER,"carbs_g":NUMBER,"fat_g":NUMBER,"sugar_g":NUMBER}
 
 Use realistic average serving size if not specified. Round to nearest whole number.`
 
