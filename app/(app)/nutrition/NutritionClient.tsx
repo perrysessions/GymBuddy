@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import {
@@ -19,11 +19,20 @@ interface Log {
 interface HistoryRow { date: string; calories: number | null; protein_g: number | null }
 
 interface Props {
-  todayLogs: Log[]
   history: HistoryRow[]
-  today: string
   calorieTarget: number
   proteinTarget: number
+}
+
+function localToday() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function offsetDate(days: number) {
+  const d = new Date()
+  d.setDate(d.getDate() + days)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 function ProgressBar({ value, target, color }: { value: number; target: number; color: string }) {
@@ -37,11 +46,12 @@ function ProgressBar({ value, target, color }: { value: number; target: number; 
 
 const EMPTY = { food: '', calories: '', protein: '', carbs: '', fat: '' }
 
-export default function NutritionClient({ todayLogs: initial, history: initialHistory, today, calorieTarget, proteinTarget }: Props) {
+export default function NutritionClient({ history: initialHistory, calorieTarget, proteinTarget }: Props) {
   const supabase = createClient()
   const router = useRouter()
+  const today = localToday()
   const [selectedDate, setSelectedDate] = useState(today)
-  const [logs, setLogs] = useState<Log[]>(initial)
+  const [logs, setLogs] = useState<Log[]>([])
   const [historyRows, setHistoryRows] = useState<HistoryRow[]>(initialHistory)
   const [form, setForm] = useState(EMPTY)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -60,6 +70,15 @@ export default function NutritionClient({ todayLogs: initial, history: initialHi
   const totalPro = logs.reduce((s, l) => s + (l.protein_g ?? 0), 0)
   const totalCarbs = logs.reduce((s, l) => s + (l.carbs_g ?? 0), 0)
   const totalFat = logs.reduce((s, l) => s + (l.fat_g ?? 0), 0)
+
+  const loadLogs = useCallback(async (date: string) => {
+    setLoadingDate(true)
+    const { data } = await supabase.from('nutrition_logs').select('*').eq('date', date).order('created_at')
+    setLogs((data ?? []) as Log[])
+    setLoadingDate(false)
+  }, [supabase])
+
+  useEffect(() => { loadLogs(today) }, [today, loadLogs])
 
   function updateHistory(date: string, newLogs: Log[]) {
     const dayTotal = { calories: newLogs.reduce((s, l) => s + (l.calories ?? 0), 0), protein_g: newLogs.reduce((s, l) => s + (l.protein_g ?? 0), 0) }
@@ -86,10 +105,7 @@ export default function NutritionClient({ todayLogs: initial, history: initialHi
 
   async function changeDate(date: string) {
     setSelectedDate(date)
-    setLoadingDate(true)
-    const { data } = await supabase.from('nutrition_logs').select('*').eq('date', date).order('created_at')
-    setLogs((data ?? []) as Log[])
-    setLoadingDate(false)
+    await loadLogs(date)
   }
 
   async function estimateMacros() {
@@ -198,18 +214,28 @@ export default function NutritionClient({ todayLogs: initial, history: initialHi
       </div>
 
       {/* Date selector */}
-      <div className="flex items-center gap-2">
-        <input type="date" value={selectedDate} max={today}
-          onChange={e => changeDate(e.target.value)}
-          className="px-3 py-2 rounded-lg border text-sm outline-none flex-1"
-          style={{ background: 'var(--card)', borderColor: 'var(--card-border)', color: 'var(--foreground)' }} />
-        {selectedDate !== today && (
-          <button onClick={() => changeDate(today)}
-            className="text-xs px-3 py-2 rounded-lg border"
-            style={{ borderColor: 'var(--card-border)', color: 'var(--muted)' }}>
-            Today
-          </button>
-        )}
+      <div className="space-y-2">
+        <div className="flex gap-2">
+          {[
+            { label: 'Today', date: today },
+            { label: 'Yesterday', date: offsetDate(-1) },
+            { label: '2 days ago', date: offsetDate(-2) },
+          ].map(({ label, date }) => (
+            <button key={date} onClick={() => changeDate(date)}
+              className="px-3 py-1.5 rounded-lg border text-xs font-medium"
+              style={{
+                background: selectedDate === date ? 'var(--accent)' : 'transparent',
+                borderColor: selectedDate === date ? 'var(--accent)' : 'var(--card-border)',
+                color: selectedDate === date ? '#fff' : 'var(--muted)',
+              }}>
+              {label}
+            </button>
+          ))}
+          <input type="date" value={selectedDate} max={today}
+            onChange={e => changeDate(e.target.value)}
+            className="ml-auto px-2 py-1.5 rounded-lg border text-xs outline-none"
+            style={{ background: 'var(--card)', borderColor: 'var(--card-border)', color: 'var(--muted)' }} />
+        </div>
       </div>
 
       {showTargets && (
